@@ -1,1 +1,616 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FlightTracker3D</title>
 
+    <!-- Leaflet CSS -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background: #0a0e1a;
+        color: #e0e8f0;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      /* ── Header ── */
+      #header {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 20px;
+        background: rgba(10, 14, 26, 0.85);
+        backdrop-filter: blur(8px);
+        border-bottom: 1px solid rgba(100, 160, 255, 0.15);
+      }
+
+      #header h1 {
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        color: #7ab8ff;
+      }
+
+      #header h1 span {
+        color: #ffffff;
+      }
+
+      #stats {
+        display: flex;
+        gap: 24px;
+        font-size: 13px;
+        color: #8aa0b8;
+      }
+
+      #stats strong {
+        color: #c8daf0;
+      }
+
+      /* ── Map ── */
+      #map {
+        position: fixed;
+        top: 49px;
+        left: 0;
+        right: 0;
+        bottom: 0;
+      }
+
+      /* ── Aircraft dot marker ── */
+      .aircraft-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #4fa8ff;
+        border: 2px solid rgba(79, 168, 255, 0.5);
+        box-shadow: 0 0 8px rgba(79, 168, 255, 0.7);
+        cursor: pointer;
+        transition: transform 0.1s;
+      }
+
+      .aircraft-dot:hover {
+        transform: scale(1.6);
+      }
+
+      .aircraft-dot.selected {
+        background: #ffd24f;
+        border-color: rgba(255, 210, 79, 0.5);
+        box-shadow: 0 0 12px rgba(255, 210, 79, 0.8);
+      }
+
+      /* Pulse ring on selected dot */
+      .aircraft-dot.selected::after {
+        content: "";
+        position: absolute;
+        inset: -6px;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 210, 79, 0.4);
+        animation: pulse 1.4s ease-out infinite;
+      }
+
+      @keyframes pulse {
+        0% {
+          transform: scale(1);
+          opacity: 1;
+        }
+        100% {
+          transform: scale(2.5);
+          opacity: 0;
+        }
+      }
+
+      /* ── Detail panel ── */
+      #detail-panel {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 1000;
+        width: 280px;
+        background: rgba(10, 14, 26, 0.9);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(100, 160, 255, 0.2);
+        border-radius: 10px;
+        padding: 16px;
+        font-size: 13px;
+        display: none;
+      }
+
+      #detail-panel h2 {
+        font-size: 15px;
+        font-weight: 600;
+        color: #ffd24f;
+        margin-bottom: 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      #detail-panel h2 button {
+        background: none;
+        border: none;
+        color: #8aa0b8;
+        cursor: pointer;
+        font-size: 16px;
+        line-height: 1;
+      }
+
+      #detail-panel h2 button:hover {
+        color: #fff;
+      }
+
+      .detail-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 5px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .detail-row:last-child {
+        border-bottom: none;
+      }
+
+      .detail-label {
+        color: #6a84a0;
+      }
+      .detail-value {
+        color: #c8daf0;
+        font-weight: 500;
+      }
+
+      /* ── Legend ── */
+      #legend {
+        position: fixed;
+        bottom: 20px;
+        left: 20px;
+        z-index: 1000;
+        background: rgba(10, 14, 26, 0.85);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(100, 160, 255, 0.15);
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 12px;
+        color: #8aa0b8;
+      }
+
+      #legend div {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 3px 0;
+      }
+
+      .legend-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      /* Override Leaflet popup to match theme */
+      .leaflet-popup-content-wrapper {
+        background: rgba(10, 14, 26, 0.92) !important;
+        color: #c8daf0 !important;
+        border: 1px solid rgba(100, 160, 255, 0.25) !important;
+        border-radius: 8px !important;
+        font-size: 12px !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+      }
+
+      .leaflet-popup-tip {
+        background: rgba(10, 14, 26, 0.92) !important;
+      }
+
+      .leaflet-container {
+        background: #060c1a !important;
+      }
+
+      /* Keep zoom animation snappy so it keeps up with trackpad */
+      .leaflet-zoom-anim .leaflet-zoom-animated {
+        transition-duration: 80ms !important;
+        transition-timing-function: linear !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="header">
+      <h1>Flight<span>Tracker3D</span></h1>
+      <div id="stats">
+        <span>Aircraft: <strong id="stat-count">0</strong></span>
+        <span>Updated: <strong id="stat-time">—</strong></span>
+      </div>
+    </div>
+
+    <div id="map"></div>
+
+    <div id="detail-panel">
+      <h2>
+        <span id="dp-callsign">—</span>
+        <button onclick="closeDetail()">✕</button>
+      </h2>
+      <div class="detail-row">
+        <span class="detail-label">Origin</span
+        ><span class="detail-value" id="dp-origin">—</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Destination</span
+        ><span class="detail-value" id="dp-dest">—</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Altitude</span
+        ><span class="detail-value" id="dp-alt">—</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Speed</span
+        ><span class="detail-value" id="dp-speed">—</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Heading</span
+        ><span class="detail-value" id="dp-heading">—</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Position</span
+        ><span class="detail-value" id="dp-pos">—</span>
+      </div>
+    </div>
+
+    <div id="legend">
+      <div>
+        <span
+          class="legend-dot"
+          style="
+            background: #4fa8ff;
+            box-shadow: 0 0 6px rgba(79, 168, 255, 0.7);
+          "
+        ></span>
+        Aircraft in flight
+      </div>
+      <div>
+        <span
+          class="legend-dot"
+          style="
+            background: #ffd24f;
+            box-shadow: 0 0 6px rgba(255, 210, 79, 0.8);
+          "
+        ></span>
+        Selected aircraft
+      </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+      // ── Map setup ────────────────────────────────────────────────────────────
+      const map = L.map("map", {
+        center: [30, 0],
+        zoom: 3,
+        minZoom: 2,
+        maxBounds: [[-90, -180], [90, 180]],
+        maxBoundsViscosity: 1.0,
+        zoomSnap: 0,
+        zoomDelta: 1,
+        zoomControl: true,
+        attributionControl: true,
+      });
+
+      // Dark tile layer (CartoDB Dark Matter)
+      L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        {
+          attribution:
+            '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org/copyright">OSM</a>',
+          maxZoom: 18,
+          noWrap: true,
+          updateWhenZooming: false,
+          keepBuffer: 4,
+        },
+      ).addTo(map);
+
+      // ── Simulated flight data ─────────────────────────────────────────────────
+      // Each flight has: callsign, origin, destination, lat, lon, heading, altitude (ft), speed (kts)
+      // lat/lon drift each tick to simulate movement.
+      const FLIGHTS = [
+        {
+          id: 1,
+          callsign: "UAL 247",
+          origin: "New York (JFK)",
+          destination: "London (LHR)",
+          lat: 48.2,
+          lon: -30.1,
+          heading: 65,
+          altitude: 38000,
+          speed: 490,
+        },
+        {
+          id: 2,
+          callsign: "AAL 102",
+          origin: "Los Angeles (LAX)",
+          destination: "Tokyo (NRT)",
+          lat: 42.8,
+          lon: -155.3,
+          heading: 295,
+          altitude: 41000,
+          speed: 510,
+        },
+        {
+          id: 3,
+          callsign: "DLH 401",
+          origin: "Frankfurt (FRA)",
+          destination: "Dubai (DXB)",
+          lat: 36.1,
+          lon: 28.7,
+          heading: 120,
+          altitude: 37000,
+          speed: 475,
+        },
+        {
+          id: 4,
+          callsign: "SIA 317",
+          origin: "Singapore (SIN)",
+          destination: "Sydney (SYD)",
+          lat: -18.4,
+          lon: 143.2,
+          heading: 155,
+          altitude: 39000,
+          speed: 500,
+        },
+        {
+          id: 5,
+          callsign: "AFR 006",
+          origin: "Paris (CDG)",
+          destination: "New York (JFK)",
+          lat: 44.0,
+          lon: -45.6,
+          heading: 255,
+          altitude: 36000,
+          speed: 460,
+        },
+        {
+          id: 6,
+          callsign: "QFA 001",
+          origin: "Sydney (SYD)",
+          destination: "Dallas (DFW)",
+          lat: -5.2,
+          lon: -170.1,
+          heading: 55,
+          altitude: 42000,
+          speed: 520,
+        },
+        {
+          id: 7,
+          callsign: "BAW 214",
+          origin: "London (LHR)",
+          destination: "Cape Town (CPT)",
+          lat: 5.3,
+          lon: 15.8,
+          heading: 175,
+          altitude: 38000,
+          speed: 480,
+        },
+        {
+          id: 8,
+          callsign: "ANA 008",
+          origin: "Tokyo (NRT)",
+          destination: "Frankfurt (FRA)",
+          lat: 56.7,
+          lon: 95.4,
+          heading: 290,
+          altitude: 40000,
+          speed: 495,
+        },
+        {
+          id: 9,
+          callsign: "EZY 7263",
+          origin: "Madrid (MAD)",
+          destination: "Amsterdam (AMS)",
+          lat: 44.2,
+          lon: 0.5,
+          heading: 15,
+          altitude: 29000,
+          speed: 410,
+        },
+        {
+          id: 10,
+          callsign: "THY 1",
+          origin: "Istanbul (IST)",
+          destination: "Chicago (ORD)",
+          lat: 46.3,
+          lon: 18.2,
+          heading: 310,
+          altitude: 37000,
+          speed: 470,
+        },
+        {
+          id: 11,
+          callsign: "CCA 981",
+          origin: "Beijing (PEK)",
+          destination: "Los Angeles (LAX)",
+          lat: 48.0,
+          lon: 168.4,
+          heading: 65,
+          altitude: 38500,
+          speed: 500,
+        },
+        {
+          id: 12,
+          callsign: "EK 201",
+          origin: "Dubai (DXB)",
+          destination: "New York (JFK)",
+          lat: 28.5,
+          lon: 42.1,
+          heading: 310,
+          altitude: 41000,
+          speed: 515,
+        },
+      ];
+
+      // ── Marker layer ──────────────────────────────────────────────────────────
+      const markers = {}; // id → L.marker
+      let selectedId = null;
+
+      function createDotIcon(selected = false) {
+        return L.divIcon({
+          className: "",
+          html: `<div class="aircraft-dot${selected ? " selected" : ""}"></div>`,
+          iconSize: [10, 10],
+          iconAnchor: [5, 5],
+        });
+      }
+
+      function initMarkers() {
+        FLIGHTS.forEach((f) => {
+          const marker = L.marker([f.lat, f.lon], { icon: createDotIcon() });
+          marker.bindTooltip(f.callsign, {
+            permanent: false,
+            direction: "top",
+            offset: [0, -8],
+            className: "",
+          });
+          marker.on("click", () => selectFlight(f.id));
+          marker.addTo(map);
+          markers[f.id] = marker;
+        });
+      }
+
+      function updateMarkers() {
+        FLIGHTS.forEach((f) => {
+          markers[f.id].setLatLng([f.lat, f.lon]);
+          markers[f.id].setIcon(createDotIcon(f.id === selectedId));
+        });
+      }
+
+      // ── Flight selection ──────────────────────────────────────────────────────
+      function selectFlight(id) {
+        selectedId = id;
+        const f = FLIGHTS.find((x) => x.id === id);
+        updateMarkers();
+
+        document.getElementById("dp-callsign").textContent = f.callsign;
+        document.getElementById("dp-origin").textContent = f.origin;
+        document.getElementById("dp-dest").textContent = f.destination;
+        document.getElementById("dp-alt").textContent =
+          f.altitude.toLocaleString() + " ft";
+        document.getElementById("dp-speed").textContent = f.speed + " kts";
+        document.getElementById("dp-heading").textContent = f.heading + "°";
+        document.getElementById("dp-pos").textContent =
+          Math.abs(f.lat).toFixed(2) +
+          (f.lat >= 0 ? "°N" : "°S") +
+          ", " +
+          Math.abs(f.lon).toFixed(2) +
+          (f.lon >= 0 ? "°E" : "°W");
+
+        document.getElementById("detail-panel").style.display = "block";
+      }
+
+      function closeDetail() {
+        selectedId = null;
+        updateMarkers();
+        document.getElementById("detail-panel").style.display = "none";
+      }
+
+      // Deselect when clicking map background
+      map.on("click", () => closeDetail());
+
+      // ── Simulated real-time movement ─────────────────────────────────────────
+      // Move each flight a small amount each tick in the direction of its heading.
+      function moveFlight(f, dt) {
+        const RAD = Math.PI / 180;
+        const KTS_TO_DEG_PER_SEC = 1 / 60 / 60; // very rough lat/lon approximation
+        const dist = f.speed * KTS_TO_DEG_PER_SEC * (dt / 1000);
+
+        f.lat += dist * Math.cos(f.heading * RAD);
+        f.lon += dist * Math.sin(f.heading * RAD);
+
+        // Wrap longitude
+        if (f.lon > 180) f.lon -= 360;
+        if (f.lon < -180) f.lon += 360;
+
+        // Clamp latitude
+        f.lat = Math.max(-85, Math.min(85, f.lat));
+
+        // Slightly randomise altitude & speed to feel live
+        f.altitude += (Math.random() - 0.5) * 50;
+        f.speed += (Math.random() - 0.5) * 2;
+
+        // Update detail panel if this flight is selected
+        if (f.id === selectedId) {
+          document.getElementById("dp-alt").textContent =
+            Math.round(f.altitude).toLocaleString() + " ft";
+          document.getElementById("dp-speed").textContent =
+            Math.round(f.speed) + " kts";
+          document.getElementById("dp-pos").textContent =
+            Math.abs(f.lat).toFixed(2) +
+            (f.lat >= 0 ? "°N" : "°S") +
+            ", " +
+            Math.abs(f.lon).toFixed(2) +
+            (f.lon >= 0 ? "°E" : "°W");
+        }
+      }
+
+      // ── Stats bar ─────────────────────────────────────────────────────────────
+      function updateStats() {
+        document.getElementById("stat-count").textContent = FLIGHTS.length;
+        const now = new Date();
+        document.getElementById("stat-time").textContent =
+          now.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          });
+      }
+
+      // ── Main loop ─────────────────────────────────────────────────────────────
+      let last = performance.now();
+
+      function tick(ts) {
+        const dt = ts - last;
+        last = ts;
+
+        FLIGHTS.forEach((f) => moveFlight(f, dt));
+        updateMarkers();
+        updateStats();
+
+        requestAnimationFrame(tick);
+      }
+
+      // ── Smooth trackpad zoom (bypasses Leaflet's debounced wheel handler) ────
+      map.scrollWheelZoom.disable();
+      let _zoomTarget = map.getZoom();
+      let _zoomRaf = null;
+      map.getContainer().addEventListener('wheel', (e) => {
+        e.preventDefault();
+        let dy = e.deltaY;
+        if (e.deltaMode === 1) dy *= 20;   // LINE mode  → convert to px
+        if (e.deltaMode === 2) dy *= 400;  // PAGE mode  → convert to px
+        _zoomTarget = Math.max(map.getMinZoom(), Math.min(18, _zoomTarget - dy / 250));
+        if (_zoomRaf) cancelAnimationFrame(_zoomRaf);
+        _zoomRaf = requestAnimationFrame(() => {
+          map.setZoom(_zoomTarget, { animate: true });
+          _zoomRaf = null;
+        });
+      }, { passive: false });
+
+      // ── Boot ──────────────────────────────────────────────────────────────────
+      initMarkers();
+      updateStats();
+      requestAnimationFrame(tick);
+    </script>
+  </body>
+</html>
