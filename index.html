@@ -3,700 +3,287 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AeroNav — Global Flight Tracker</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<meta name="description" content="AeroNav3D — interactive 3D globe powered by Cesium and Google Maps.">
+<title>AeroNav3D — 3D Globe</title>
+
+<!-- Cesium (free tier, CDN) -->
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+<link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css">
+
 <style>
-  html,body{margin:0;padding:0;height:100%;background:#05070f;overflow:hidden;}
-  *{box-sizing:border-box;}
-  input{font-family:'IBM Plex Mono',monospace;}
-  input[type=range]{-webkit-appearance:none;appearance:none;height:3px;background:rgba(65,150,255,.18);border-radius:3px;outline:none;}
-  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:13px;height:13px;border-radius:50%;background:#41c7c7;box-shadow:0 0 8px rgba(65,199,199,.8);cursor:pointer;}
-  ::selection{background:rgba(65,199,199,.3);}
-  *::-webkit-scrollbar{width:6px;height:6px;}
-  *::-webkit-scrollbar-thumb{background:rgba(65,150,255,.22);border-radius:3px;}
-  *::-webkit-scrollbar-track{background:transparent;}
-  @keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
-  @keyframes sweep{to{transform:rotate(360deg)}}
+  :root{
+    --bg:#070a12;
+    --panel:rgba(13,18,30,.78);
+    --border:rgba(120,160,220,.16);
+    --text:#dfe7f1;
+    --muted:#7c8aa0;
+    --accent:#4cc3ff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;overflow:hidden;background:var(--bg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--text);}
+
+  #globe{position:absolute;inset:0;}
+  #globe .cesium-viewer,#globe .cesium-widget,#globe .cesium-widget canvas{width:100%;height:100%;}
+
+  /* Keep Google/Cesium attribution visible (required), but style it subtly */
+  .cesium-viewer-bottom{left:12px!important;bottom:10px!important;}
+  .cesium-credit-logoContainer{display:none!important;}
+  .cesium-widget-credits,.cesium-widget-credits a{
+    color:var(--muted)!important;font-size:10px!important;text-decoration:none!important;}
+
+  /* ---------- Branding ---------- */
+  .brand{
+    position:absolute;top:20px;left:20px;z-index:10;
+    display:flex;align-items:center;gap:12px;
+    padding:10px 16px 10px 12px;border-radius:12px;
+    background:var(--panel);border:1px solid var(--border);
+    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    user-select:none;
+  }
+  .brand svg{display:block;}
+  .brand .name{font-size:17px;font-weight:700;letter-spacing:.04em;}
+  .brand .name em{font-style:normal;color:var(--accent);}
+  .brand .tag{font-size:10px;letter-spacing:.28em;color:var(--muted);margin-top:2px;text-transform:uppercase;}
+
+  /* ---------- Controls ---------- */
+  .controls{
+    position:absolute;right:20px;bottom:28px;z-index:10;
+    display:flex;flex-direction:column;gap:8px;
+  }
+  .controls button{
+    width:42px;height:42px;border-radius:10px;cursor:pointer;
+    background:var(--panel);border:1px solid var(--border);color:var(--text);
+    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    font-size:17px;line-height:1;display:flex;align-items:center;justify-content:center;
+    transition:background .15s,border-color .15s,transform .1s;
+  }
+  .controls button:hover{background:rgba(40,55,85,.85);border-color:rgba(120,180,255,.4);}
+  .controls button:active{transform:scale(.94);}
+  .controls .divider{height:1px;background:var(--border);margin:2px 4px;}
+
+  /* ---------- Hint / status ---------- */
+  .hint{
+    position:absolute;left:50%;bottom:28px;transform:translateX(-50%);z-index:10;
+    padding:8px 16px;border-radius:999px;white-space:nowrap;
+    background:var(--panel);border:1px solid var(--border);
+    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    font-size:11px;color:var(--muted);letter-spacing:.06em;
+    transition:opacity .8s;pointer-events:none;
+  }
+  .notice{
+    position:absolute;top:20px;right:20px;z-index:10;max-width:320px;
+    padding:12px 14px;border-radius:10px;font-size:12px;line-height:1.5;
+    background:rgba(60,35,10,.85);border:1px solid rgba(255,170,60,.35);color:#ffd9a0;
+    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);display:none;
+  }
+  #loader{
+    position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:14px;background:var(--bg);
+    transition:opacity .6s;
+  }
+  #loader .ring{
+    width:44px;height:44px;border-radius:50%;
+    border:2px solid var(--border);border-top-color:var(--accent);
+    animation:spin 1s linear infinite;
+  }
+  #loader span{font-size:11px;letter-spacing:.3em;color:var(--muted);text-transform:uppercase;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  @media (max-width:600px){
+    .brand{top:12px;left:12px;padding:8px 12px 8px 10px;}
+    .brand .name{font-size:15px;}
+    .brand .tag{display:none;}
+    .controls{right:12px;bottom:20px;}
+    .controls button{width:38px;height:38px;}
+    .hint{display:none;}
+    .notice{top:auto;bottom:76px;right:12px;left:12px;max-width:none;}
+  }
 </style>
 </head>
 <body>
-<div style="position:relative;width:100vw;height:100vh;overflow:hidden;background:radial-gradient(circle at 50% 42%,#0a1224 0%,#05070f 58%,#03040a 100%);font-family:'Space Grotesk',sans-serif;color:#cdd9e5;">
 
-  <div id="aeronav-mount" style="position:absolute;inset:0;cursor:grab;"></div>
-  <div style="position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 46%,transparent 52%,rgba(0,0,0,.6) 100%);"></div>
-  <div style="position:absolute;inset:0;pointer-events:none;opacity:.035;background:repeating-linear-gradient(0deg,#9ff 0 1px,transparent 1px 3px);"></div>
-  <div style="position:absolute;top:14px;left:14px;width:26px;height:26px;border-left:1px solid rgba(65,199,199,.4);border-top:1px solid rgba(65,199,199,.4);pointer-events:none;"></div>
-  <div style="position:absolute;top:14px;right:14px;width:26px;height:26px;border-right:1px solid rgba(65,199,199,.4);border-top:1px solid rgba(65,199,199,.4);pointer-events:none;"></div>
-  <div style="position:absolute;bottom:14px;left:14px;width:26px;height:26px;border-left:1px solid rgba(65,199,199,.4);border-bottom:1px solid rgba(65,199,199,.4);pointer-events:none;"></div>
-  <div style="position:absolute;bottom:14px;right:14px;width:26px;height:26px;border-right:1px solid rgba(65,199,199,.4);border-bottom:1px solid rgba(65,199,199,.4);pointer-events:none;"></div>
+<div id="globe"></div>
 
-  <!-- TOP BAR -->
-  <div style="position:absolute;top:0;left:0;right:0;padding:18px 24px;display:flex;justify-content:space-between;align-items:flex-start;pointer-events:none;gap:16px;z-index:20;">
-    <div style="display:flex;align-items:center;gap:13px;pointer-events:auto;">
-      <div style="width:36px;height:36px;border:1px solid rgba(65,199,199,.45);border-radius:50%;display:flex;align-items:center;justify-content:center;position:relative;">
-        <div style="width:6px;height:6px;border-radius:50%;background:#41c7c7;box-shadow:0 0 10px #41c7c7;"></div>
-        <div style="position:absolute;inset:-1px;border-radius:50%;border-top:1px solid rgba(65,199,199,.85);animation:sweep 4s linear infinite;"></div>
-      </div>
-      <div>
-        <div style="font-weight:700;font-size:18px;letter-spacing:.2em;color:#eef4f9;">AERONAV</div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.3em;color:#41c7c7;margin-top:1px;">GLOBAL TRAFFIC · LIVE</div>
-      </div>
-    </div>
-    <div style="position:relative;width:360px;pointer-events:auto;">
-      <div style="display:flex;align-items:center;gap:9px;background:rgba(8,15,26,.74);border:1px solid rgba(65,150,255,.2);backdrop-filter:blur(12px);border-radius:5px;padding:10px 13px;">
-        <span style="color:#41c7c7;font-size:14px;line-height:1;">⌕</span>
-        <input id="searchInput" placeholder="SEARCH FLIGHT · AIRPORT · CITY" style="flex:1;background:transparent;border:none;outline:none;color:#e7eef5;font-size:12px;letter-spacing:.07em;"/>
-        <span id="searchClear" style="display:none;cursor:pointer;color:#5f7488;font-family:'IBM Plex Mono',monospace;font-size:10px;border:1px solid rgba(95,116,136,.3);border-radius:3px;padding:1px 4px;">CLR</span>
-      </div>
-      <div id="searchResults" style="display:none;position:absolute;top:48px;left:0;right:0;background:rgba(7,13,24,.95);border:1px solid rgba(65,150,255,.2);backdrop-filter:blur(14px);border-radius:5px;overflow:hidden;max-height:330px;overflow-y:auto;box-shadow:0 18px 54px rgba(0,0,0,.65);z-index:50;"></div>
-    </div>
-    <div style="display:flex;gap:9px;align-items:center;pointer-events:auto;">
-      <div style="display:flex;align-items:center;gap:6px;background:rgba(8,15,26,.74);border:1px solid rgba(65,150,255,.2);backdrop-filter:blur(12px);border-radius:5px;padding:9px 12px;">
-        <span style="width:7px;height:7px;border-radius:50%;background:#2fd6a0;box-shadow:0 0 8px #2fd6a0;animation:blink 1.8s infinite;"></span>
-        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.18em;color:#2fd6a0;">LIVE</span>
-      </div>
-      <div style="background:rgba(8,15,26,.74);border:1px solid rgba(65,150,255,.2);backdrop-filter:blur(12px);border-radius:5px;padding:9px 12px;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;color:#9fc0dd;"><span id="utcClock">--:--:--</span> <span style="color:#5f7488;font-size:9px;">UTC</span></div>
-    </div>
+<!-- Branding -->
+<div class="brand" aria-label="AeroNav3D">
+  <svg width="34" height="34" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <circle cx="17" cy="17" r="13" stroke="#4cc3ff" stroke-width="1.4"/>
+    <ellipse cx="17" cy="17" rx="13" ry="5.2" stroke="#4cc3ff" stroke-width="1" opacity=".55"/>
+    <path d="M17 4v26M4 17h26" stroke="#4cc3ff" stroke-width=".7" opacity=".35"/>
+    <path d="M23.5 10.5 15 19l-3.4-1.4-1.6 1.6 3.6 1.8 1.8 3.6 1.6-1.6L15.6 19l8.5-8.5-.6-.6Z" fill="#dfe7f1"/>
+  </svg>
+  <div>
+    <div class="name">Aero<em>Nav</em>3D</div>
+    <div class="tag">Global Navigation</div>
   </div>
-
-
-
-  <!-- RIGHT: FLIGHT DETAIL -->
-  <div id="flightDetail" style="display:none;position:absolute;right:24px;top:92px;width:320px;background:rgba(8,15,26,.8);border:1px solid rgba(65,150,255,.2);backdrop-filter:blur(15px);border-radius:6px;box-shadow:0 16px 54px rgba(0,0,0,.6);overflow:hidden;z-index:18;">
-    <div style="display:flex;align-items:stretch;border-bottom:1px solid rgba(65,150,255,.12);">
-      <div id="fdAccent" style="width:4px;background:#41c7c7;box-shadow:0 0 12px #41c7c7;flex-shrink:0;"></div>
-      <div style="flex:1;padding:14px 15px;">
-        <div id="fdStatus" style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.2em;color:#41c7c7;">EN ROUTE</div>
-        <div id="fdCallsign" style="font-size:24px;font-weight:700;letter-spacing:.04em;color:#eef4f9;margin-top:2px;">—</div>
-        <div id="fdFlightInfo" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#7e93a6;margin-top:2px;">—</div>
-      </div>
-      <div id="fdClose" style="padding:14px 16px;cursor:pointer;color:#5f7488;font-size:16px;line-height:1;flex-shrink:0;">✕</div>
-    </div>
-    <div style="padding:16px 15px 14px;">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;">
-        <div><div id="fdOriginCode" style="font-size:26px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:#eef4f9;line-height:1;">—</div><div id="fdOriginCity" style="font-size:11px;color:#7e93a6;margin-top:4px;">—</div></div>
-        <div style="color:#41c7c7;font-size:16px;padding-top:4px;">✈</div>
-        <div style="text-align:right;"><div id="fdDestCode" style="font-size:26px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:#eef4f9;line-height:1;">—</div><div id="fdDestCity" style="font-size:11px;color:#7e93a6;margin-top:4px;">—</div></div>
-      </div>
-      <div style="position:relative;height:3px;background:rgba(65,150,255,.14);margin:16px 0 7px;border-radius:3px;">
-        <div id="fdProgressBar" style="position:absolute;left:0;top:0;height:100%;width:0%;background:linear-gradient(90deg,#1e90ff,#41c7c7);border-radius:3px;transition:width .8s linear;"></div>
-        <div id="fdProgressDot" style="position:absolute;top:50%;left:0%;transform:translate(-50%,-50%);width:9px;height:9px;border-radius:50%;background:#fff;box-shadow:0 0 10px #41c7c7;transition:left .8s linear;"></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#5f7488;">
-        <span id="fdDepTime">--:--</span><span id="fdEta" style="color:#9fc0dd;">— LEFT</span><span id="fdArrTime">--:--</span>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:15px;">
-        <div style="background:rgba(65,150,255,.05);border:1px solid rgba(65,150,255,.1);border-radius:4px;padding:9px;">
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:.14em;color:#5f7488;">ALT</div>
-          <div id="fdAlt" style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#dfe9f2;margin-top:3px;">—</div>
-        </div>
-        <div style="background:rgba(65,150,255,.05);border:1px solid rgba(65,150,255,.1);border-radius:4px;padding:9px;">
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:.14em;color:#5f7488;">GND SPD</div>
-          <div id="fdSpd" style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#dfe9f2;margin-top:3px;">—</div>
-        </div>
-        <div style="background:rgba(65,150,255,.05);border:1px solid rgba(65,150,255,.1);border-radius:4px;padding:9px;">
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:.14em;color:#5f7488;">HDG</div>
-          <div id="fdHdg" style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#dfe9f2;margin-top:3px;">—</div>
-        </div>
-        <div style="background:rgba(65,150,255,.05);border:1px solid rgba(65,150,255,.1);border-radius:4px;padding:9px;grid-column:span 2;">
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:.14em;color:#5f7488;">AIRCRAFT</div>
-          <div id="fdAircraft" style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#dfe9f2;margin-top:3px;">—</div>
-        </div>
-        <div style="background:rgba(65,150,255,.05);border:1px solid rgba(65,150,255,.1);border-radius:4px;padding:9px;">
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:.14em;color:#5f7488;">DIST</div>
-          <div id="fdDist" style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#dfe9f2;margin-top:3px;">—</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- RIGHT: AIRPORT DETAIL -->
-  <div id="airportDetail" style="display:none;position:absolute;right:24px;top:92px;width:368px;max-height:calc(100vh - 116px);overflow-y:auto;background:rgba(8,15,26,.84);border:1px solid rgba(65,150,255,.2);backdrop-filter:blur(15px);border-radius:6px;box-shadow:0 16px 54px rgba(0,0,0,.6);z-index:19;">
-    <div style="display:flex;align-items:flex-start;gap:12px;padding:14px 15px;border-bottom:1px solid rgba(65,150,255,.12);">
-      <div id="apIata" style="font-size:30px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:#41c7c7;line-height:.85;">—</div>
-      <div style="flex:1;min-width:0;">
-        <div id="apName" style="font-size:12px;font-weight:600;color:#eef4f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
-        <div id="apSub" style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#7e93a6;margin-top:2px;">—</div>
-      </div>
-      <div id="apClose" style="cursor:pointer;color:#5f7488;font-size:16px;line-height:1;flex-shrink:0;">✕</div>
-    </div>
-    <div style="position:relative;height:140px;margin:13px 15px 0;border:1px solid rgba(65,150,255,.18);border-radius:5px;overflow:hidden;background:repeating-linear-gradient(135deg,#0c1626 0 11px,#0a1220 11px 22px);display:flex;align-items:center;justify-content:center;">
-      <div style="text-align:center;">
-        <div id="apPhotoLabel" style="font-family:'IBM Plex Mono',monospace;font-size:24px;letter-spacing:.12em;color:#3c5b73;">APT</div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.22em;color:#33506a;margin-top:5px;">AIRPORT PHOTO · LIVE FEED</div>
-      </div>
-      <div style="position:absolute;top:8px;left:10px;display:flex;align-items:center;gap:5px;font-family:'IBM Plex Mono',monospace;font-size:9px;color:#ff6f6f;letter-spacing:.1em;"><span style="width:6px;height:6px;border-radius:50%;background:#ff6f6f;animation:blink 1.6s infinite;"></span>REC</div>
-      <div id="apLocalTime" style="position:absolute;bottom:8px;right:10px;font-family:'IBM Plex Mono',monospace;font-size:9px;color:#5f7488;">-- LOCAL</div>
-    </div>
-    <div style="margin:14px 15px 0;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;">
-        <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.22em;color:#5f7488;">CONDITIONS</span>
-        <span id="apWeatherStatus" style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#2fd6a0;border:1px solid #2fd6a0;border-radius:3px;padding:2px 8px;">NORMAL OPS</span>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;">
-        <div style="background:rgba(65,150,255,.05);border:1px solid rgba(65,150,255,.1);border-radius:4px;padding:8px 6px;text-align:center;">
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:.12em;color:#5f7488;">TEMP</div>
-          <div id="apTemp" style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#dfe9f2;margin-top:3px;">—</div>
-        </div>
-        <div style="background:rgba(65,150,255,.05);border:1px solid rgba(65,150,255,.1);border-radius:4px;padding:8px 6px;text-align:center;">
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:.12em;color:#5f7488;">WIND</div>
-          <div id="apWind" style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#dfe9f2;margin-top:3px;">—</div>
-        </div>
-        <div style="background:rgba(65,150,255,.05);border:1px solid rgba(65,150,255,.1);border-radius:4px;padding:8px 6px;text-align:center;">
-          <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:.12em;color:#5f7488;">VIS</div>
-          <div id="apVis" style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#dfe9f2;margin-top:3px;">—</div>
-        </div>
-      </div>
-      <div style="display:flex;justify-content:space-between;margin-top:9px;font-family:'IBM Plex Mono',monospace;font-size:10px;">
-        <span style="color:#5f7488;letter-spacing:.12em;">SKY</span><span id="apCond" style="color:#9fc0dd;">—</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:9px;margin-top:9px;">
-        <span style="font-family:'IBM Plex Mono',monospace;font-size:8px;color:#5f7488;letter-spacing:.1em;">DISRUPTION</span>
-        <div style="flex:1;height:5px;background:rgba(65,150,255,.12);border-radius:3px;overflow:hidden;"><div id="apDisruptBar" style="height:100%;width:14%;background:#2fd6a0;border-radius:3px;"></div></div>
-      </div>
-    </div>
-    <div style="margin:14px 15px 0;font-family:'IBM Plex Mono',monospace;font-size:10px;">
-      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(65,150,255,.07);"><span style="color:#5f7488;letter-spacing:.1em;">ELEVATION</span><span id="apElev" style="color:#cdd9e5;">—</span></div>
-      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(65,150,255,.07);"><span style="color:#5f7488;letter-spacing:.1em;">COORDINATES</span><span id="apCoords" style="color:#cdd9e5;">—</span></div>
-      <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#5f7488;letter-spacing:.1em;">TIMEZONE</span><span id="apTz" style="color:#cdd9e5;">—</span></div>
-    </div>
-    <div id="apBoardWrap">
-      <div style="margin:15px 15px 0;">
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.22em;color:#41c7c7;margin-bottom:6px;">↑ DEPARTURES</div>
-        <div id="apDepartures" style="max-height:154px;overflow-y:auto;"></div>
-      </div>
-      <div style="margin:15px 15px 16px;">
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.22em;color:#ffb347;margin-bottom:6px;">↓ ARRIVALS</div>
-        <div id="apArrivals" style="max-height:154px;overflow-y:auto;"></div>
-      </div>
-    </div>
-    <div id="apNoService" style="display:none;margin:16px 15px;padding:18px 12px;text-align:center;border:1px dashed rgba(65,150,255,.18);border-radius:5px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;color:#5f7488;">NO SCHEDULED COMMERCIAL SERVICE</div>
-  </div>
-
-  <!-- BOTTOM-RIGHT: LEGEND -->
-  <div style="position:absolute;right:24px;bottom:24px;width:190px;background:rgba(8,15,26,.72);border:1px solid rgba(65,150,255,.16);backdrop-filter:blur(13px);border-radius:6px;padding:13px 14px;z-index:15;">
-    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.2em;color:#5f7488;margin-bottom:8px;">ALTITUDE</div>
-    <div style="height:6px;border-radius:3px;background:linear-gradient(90deg,#ff7a33,#ffd166,#5bd6ff);"></div>
-    <div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:9px;color:#6b7c8f;margin-top:4px;"><span>FL000</span><span>FL450</span></div>
-    <div style="height:1px;background:rgba(65,150,255,.1);margin:11px 0 9px;"></div>
-    <div style="display:flex;align-items:center;gap:7px;font-family:'IBM Plex Mono',monospace;font-size:9px;color:#6b7c8f;">
-      <span style="width:6px;height:6px;border-radius:50%;background:#2fd6a0;box-shadow:0 0 6px #2fd6a0;flex-shrink:0;"></span> SIMULATED · LIVE-API READY
-    </div>
-  </div>
-
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+<!-- Missing-key notice -->
+<div class="notice" id="notice"></div>
+
+<!-- Camera controls -->
+<div class="controls" aria-label="Globe controls">
+  <button id="zoomIn"  title="Zoom in"  aria-label="Zoom in">+</button>
+  <button id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
+  <div class="divider"></div>
+  <button id="tiltUp"   title="Tilt up"   aria-label="Tilt up">⤒</button>
+  <button id="tiltDown" title="Tilt down" aria-label="Tilt down">⤓</button>
+  <div class="divider"></div>
+  <button id="home" title="Reset view" aria-label="Reset view">⌂</button>
+</div>
+
+<div class="hint" id="hint">Drag to pan &nbsp;·&nbsp; Scroll to zoom &nbsp;·&nbsp; Ctrl + drag to tilt</div>
+
+<div id="loader"><div class="ring"></div><span>AeroNav3D</span></div>
+
 <script>
-class AeroNav {
-  constructor(){
-    this.AIRLINES=[
-      {iata:'UA',icao:'UAL',name:'United',color:'#4ea1ff'},
-      {iata:'DL',icao:'DAL',name:'Delta',color:'#ff5c8a'},
-      {iata:'AA',icao:'AAL',name:'American',color:'#c5d4e3'},
-      {iata:'BA',icao:'BAW',name:'British Airways',color:'#6fe3c0'},
-      {iata:'LH',icao:'DLH',name:'Lufthansa',color:'#ffcf5c'},
-      {iata:'AF',icao:'AFR',name:'Air France',color:'#8ea2ff'},
-      {iata:'EK',icao:'UAE',name:'Emirates',color:'#ff8c42'},
-      {iata:'SQ',icao:'SIA',name:'Singapore',color:'#ffd166'},
-      {iata:'QF',icao:'QFA',name:'Qantas',color:'#ff6f6f'},
-      {iata:'NH',icao:'ANA',name:'All Nippon',color:'#7fd1ff'},
-    ];
-    this.AIRPORTS=[
-      ['JFK','New York',40.64,-73.78],['LAX','Los Angeles',33.94,-118.41],['SFO','San Francisco',37.62,-122.38],
-      ['ORD','Chicago',41.98,-87.90],['ATL','Atlanta',33.64,-84.43],['MIA','Miami',25.80,-80.29],
-      ['SEA','Seattle',47.45,-122.31],['DEN','Denver',39.86,-104.67],['BOS','Boston',42.36,-71.01],
-      ['YYZ','Toronto',43.68,-79.63],['MEX','Mexico City',19.44,-99.07],['GRU','São Paulo',-23.43,-46.47],
-      ['GIG','Rio de Janeiro',-22.81,-43.25],['EZE','Buenos Aires',-34.82,-58.54],['BOG','Bogotá',4.70,-74.15],
-      ['LIM','Lima',-12.02,-77.11],['LHR','London',51.47,-0.46],['CDG','Paris',49.01,2.55],
-      ['AMS','Amsterdam',52.31,4.76],['FRA','Frankfurt',50.04,8.56],['MAD','Madrid',40.47,-3.56],
-      ['BCN','Barcelona',41.30,2.08],['MUC','Munich',48.35,11.79],['ZRH','Zürich',47.46,8.55],
-      ['IST','Istanbul',41.26,28.74],['SVO','Moscow',55.97,37.41],['DXB','Dubai',25.25,55.36],
-      ['DOH','Doha',25.27,51.61],['JNB','Johannesburg',-26.13,28.24],['CPT','Cape Town',-33.97,18.60],
-      ['CAI','Cairo',30.11,31.40],['NBO','Nairobi',-1.32,36.93],['DEL','Delhi',28.56,77.10],
-      ['BOM','Mumbai',19.09,72.87],['SIN','Singapore',1.36,103.99],['HKG','Hong Kong',22.31,113.91],
-      ['PEK','Beijing',40.08,116.58],['PVG','Shanghai',31.14,121.81],['NRT','Tokyo',35.77,140.39],
-      ['HND','Tokyo Haneda',35.55,139.78],['ICN','Seoul',37.46,126.44],['BKK','Bangkok',13.69,100.75],
-      ['KUL','Kuala Lumpur',2.75,101.71],['CGK','Jakarta',-6.13,106.66],['SYD','Sydney',-33.95,151.18],
-      ['MEL','Melbourne',-37.67,144.84],['AKL','Auckland',-37.01,174.79],
-    ].map((a,i)=>({iata:a[0],city:a[1],lat:a[2],lon:a[3],id:i}));
-    this.AIRCRAFT=['A320','A321neo','A330-300','A350-900','A380-800','B737-800','B777-300ER','B787-9','B747-8','E190'];
+"use strict";
 
-    this._filters={airlines:new Set(this.AIRLINES.map(a=>a.icao)),altMin:0,altMax:45,region:'ALL'};
-    this.viewMode='SATELLITE';
-    this.flights=[];
-    this.planeSprites=[];
-    this.selectedId=null;
-    this.selAirport=null;
-    this._focus=null;
-    this._lastHover=0;
-    this._down=null;
+/* ================= CONFIGURATION =================
+ * Google Maps Platform API key with the "Map Tiles API" enabled:
+ * https://console.cloud.google.com/google/maps-apis
+ * Without a key, the globe falls back to Cesium's bundled
+ * Natural Earth II imagery (no extra dependencies).
+ * ================================================= */
+const GOOGLE_MAPS_API_KEY = "AIzaSyA-n1jGuFhWQGcBPJNXauBWGnATg8Wg42U";
+const GOOGLE_MAP_TYPE = "satellite"; // "satellite" | "roadmap" | "terrain"
 
-    this._boot();
-  }
+const HOME_VIEW = {
+  destination: Cesium.Cartesian3.fromDegrees(0, 18, 22_000_000),
+  orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 }
+};
 
-  _boot(){
-    this._initThree();
-    this._buildStars();
-    this._buildOcean();
-    this._buildGraticule();
-    this._buildAtmosphere();
-    this._buildAirports();
-    this._buildSelectionHelpers();
-    this._buildContinents();
-    this._buildSatellite();
-    this._buildFlights();
-    this._bindUI();
-    this._startClock();
-    this.computeStats();
-    this.renderAirlines();
-    this.renderRegions();
-    this._clock=new THREE.Clock();
-    this._animate();
-  }
+/* ---------------- Viewer ---------------- */
+const viewer = new Cesium.Viewer("globe", {
+  baseLayer: false,
+  baseLayerPicker: false,
+  geocoder: false,
+  homeButton: false,
+  sceneModePicker: false,
+  navigationHelpButton: false,
+  animation: false,
+  timeline: false,
+  fullscreenButton: false,
+  infoBox: false,
+  selectionIndicator: false
+});
 
-  // ── Three.js setup ──────────────────────────────────────────────────────────
-  _initThree(){
-    this.R=100;
-    const mount=document.getElementById('aeronav-mount');
-    this.mount=mount;
-    const w=mount.clientWidth,h=mount.clientHeight;
-    const scene=new THREE.Scene(); this.scene=scene;
-    const camera=new THREE.PerspectiveCamera(34,w/h,0.1,5000);
-    camera.position.set(0,70,285); this.camera=camera;
-    const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
-    renderer.setSize(w,h); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
-    mount.appendChild(renderer.domElement); this.renderer=renderer;
-    const controls=new THREE.OrbitControls(camera,renderer.domElement);
-    controls.enableDamping=true; controls.dampingFactor=0.07; controls.enablePan=false;
-    controls.minDistance=104; controls.maxDistance=520; controls.rotateSpeed=0.5;
-    controls.autoRotate=true; controls.autoRotateSpeed=0.22;
-    this.controls=controls;
-    controls.addEventListener('start',()=>mount.style.cursor='grabbing');
-    controls.addEventListener('end',()=>mount.style.cursor='grab');
-    this.earth=new THREE.Group(); scene.add(this.earth);
-    this.raycaster=new THREE.Raycaster();
-    this._pointer=new THREE.Vector2();
-    const el=renderer.domElement;
-    el.addEventListener('pointerdown',e=>{ this._down={x:e.clientX,y:e.clientY,t:Date.now()}; });
-    el.addEventListener('pointerup',e=>{ if(!this._down)return; const dx=e.clientX-this._down.x,dy=e.clientY-this._down.y; if(Math.hypot(dx,dy)<6&&Date.now()-this._down.t<450)this._handleClick(e); this._down=null; });
-    el.addEventListener('pointermove',e=>this._handleHover(e));
-    this.tooltip=document.createElement('div');
-    this.tooltip.style.cssText="position:absolute;pointer-events:none;z-index:30;display:none;background:rgba(7,13,24,.92);border:1px solid rgba(65,199,199,.4);border-radius:4px;padding:5px 8px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#e7eef5;white-space:nowrap;transform:translate(-50%,-150%);box-shadow:0 4px 18px rgba(0,0,0,.5);";
-    mount.appendChild(this.tooltip);
-    window.addEventListener('resize',()=>{ if(!this.renderer)return; const w=mount.clientWidth,h=mount.clientHeight; camera.aspect=w/h; camera.updateProjectionMatrix(); renderer.setSize(w,h); });
-  }
+const scene = viewer.scene;
+scene.globe.baseColor = Cesium.Color.fromCssColorString("#0b1226");
+scene.globe.enableLighting = false;
+scene.globe.showGroundAtmosphere = true;
+scene.skyAtmosphere.show = true;
+scene.moon.show = false;
+scene.fog.enabled = true;
+scene.screenSpaceCameraController.minimumZoomDistance = 250;
+scene.screenSpaceCameraController.maximumZoomDistance = 40_000_000;
+viewer.camera.setView(HOME_VIEW);
 
-  // ── Globe geometry ──────────────────────────────────────────────────────────
-  lonlatToVec3(lon,lat,r){ const phi=(90-lat)*Math.PI/180,theta=(lon+180)*Math.PI/180; return new THREE.Vector3(-r*Math.sin(phi)*Math.cos(theta),r*Math.cos(phi),r*Math.sin(phi)*Math.sin(theta)); }
-  vecToLonLat(v){ const u=v.clone().normalize(); const lat=90-Math.acos(u.y)*180/Math.PI; let lon=Math.atan2(u.z,-u.x)*180/Math.PI-180; while(lon<-180)lon+=360; while(lon>180)lon-=360; return {lat,lon}; }
-  bearing(a,b){ const f1=a.lat*Math.PI/180,f2=b.lat*Math.PI/180,dl=(b.lon-a.lon)*Math.PI/180; return(Math.atan2(Math.sin(dl)*Math.cos(f2),Math.cos(f1)*Math.sin(f2)-Math.sin(f1)*Math.cos(f2)*Math.cos(dl))*180/Math.PI+360)%360; }
-
-  _buildStars(){
-    const n=1600,pos=new Float32Array(n*3),col=new Float32Array(n*3);
-    for(let i=0;i<n;i++){ const r=1300+Math.random()*900,t=Math.acos(2*Math.random()-1),p=Math.random()*Math.PI*2; pos[i*3]=r*Math.sin(t)*Math.cos(p);pos[i*3+1]=r*Math.cos(t);pos[i*3+2]=r*Math.sin(t)*Math.sin(p); const b=0.4+Math.random()*0.6;col[i*3]=b*0.8;col[i*3+1]=b*0.9;col[i*3+2]=b; }
-    const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(pos,3)); g.setAttribute('color',new THREE.BufferAttribute(col,3));
-    this.scene.add(new THREE.Points(g,new THREE.PointsMaterial({size:2,vertexColors:true,transparent:true,opacity:.85,sizeAttenuation:false})));
-  }
-
-  _buildOcean(){
-    this.sunDir={value:new THREE.Vector3(1,0,0)};
-    const mat=new THREE.ShaderMaterial({uniforms:{sunDir:this.sunDir},vertexShader:'varying vec3 vWN;void main(){vWN=normalize(mat3(modelMatrix)*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',fragmentShader:'uniform vec3 sunDir;varying vec3 vWN;void main(){float d=dot(normalize(vWN),normalize(sunDir));float day=smoothstep(-0.22,0.32,d);vec3 night=vec3(0.012,0.022,0.046);vec3 dayc=vec3(0.043,0.115,0.176);gl_FragColor=vec4(mix(night,dayc,day),1.0);}'});
-    this.oceanMesh=new THREE.Mesh(new THREE.SphereGeometry(this.R,96,96),mat); this.earth.add(this.oceanMesh);
-  }
-
-  _buildGraticule(){
-    const verts=[],R=this.R*1.0015;
-    for(let lat=-75;lat<=75;lat+=15)for(let lon=-180;lon<180;lon+=4){const a=this.lonlatToVec3(lon,lat,R),b=this.lonlatToVec3(lon+4,lat,R);verts.push(a.x,a.y,a.z,b.x,b.y,b.z);}
-    for(let lon=-180;lon<180;lon+=15)for(let lat=-88;lat<88;lat+=4){const a=this.lonlatToVec3(lon,lat,R),b=this.lonlatToVec3(lon,lat+4,R);verts.push(a.x,a.y,a.z,b.x,b.y,b.z);}
-    const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
-    this.earth.add(new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0x2f6fb0,transparent:true,opacity:.1})));
-  }
-
-  _buildAtmosphere(){
-    const mat=new THREE.ShaderMaterial({vertexShader:'varying vec3 vN;void main(){vN=normalize(normalMatrix*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',fragmentShader:'varying vec3 vN;void main(){float i=pow(0.72-dot(vN,vec3(0,0,1)),3.0);gl_FragColor=vec4(0.16,0.52,1.0,clamp(i,0.0,1.0)*0.9);}',blending:THREE.AdditiveBlending,side:THREE.BackSide,transparent:true,depthWrite:false});
-    this.scene.add(new THREE.Mesh(new THREE.SphereGeometry(this.R*1.16,64,64),mat));
-  }
-
-  _ringTex(){ const c=document.createElement('canvas');c.width=c.height=128;const x=c.getContext('2d');x.strokeStyle='rgba(255,255,255,1)';x.lineWidth=6;x.beginPath();x.arc(64,64,48,0,7);x.stroke();return new THREE.CanvasTexture(c); }
-  _dotTex(){ const c=document.createElement('canvas');c.width=c.height=64;const x=c.getContext('2d');const g=x.createRadialGradient(32,32,0,32,32,32);g.addColorStop(0,'rgba(255,255,255,1)');g.addColorStop(.35,'rgba(255,255,255,.95)');g.addColorStop(.55,'rgba(255,255,255,.35)');g.addColorStop(1,'rgba(255,255,255,0)');x.fillStyle=g;x.fillRect(0,0,64,64);return new THREE.CanvasTexture(c); }
-
-  _buildAirports(){
-    this.allAirports=this.AIRPORTS.map(a=>({icao:'',iata:a.iata,name:a.city+' Airport',city:a.city,country:'',elevation:0,lat:a.lat,lon:a.lon,tz:'',vec:this.lonlatToVec3(a.lon,a.lat,this.R*1.004)}));
-    this._rebuildAirportPts();
-    this.airportRing=new THREE.Sprite(new THREE.SpriteMaterial({map:this._ringTex(),color:0x41c7c7,transparent:true,depthTest:false,opacity:.95}));
-    this.airportRing.scale.set(6.5,6.5,1); this.airportRing.visible=false; this.earth.add(this.airportRing);
-    fetch('https://cdn.jsdelivr.net/gh/mwgg/Airports/airports.json').then(r=>r.json()).then(data=>{
-      const arr=[];
-      const SKIP=/heliport|helipad|airstrip|ultralight|glider|balloon|seaplane|water|private|military|air base|air force|naval|army/i;
-      for(const k in data){
-        const a=data[k];
-        if(!a||typeof a.lat!=='number'||typeof a.lon!=='number')continue;
-        const iata=a.iata||'';
-        if(!/^[A-Z]{3}$/.test(iata))continue;
-        if(a.type&&a.type==='small_airport')continue;
-        if(a.type&&(a.type==='heliport'||a.type==='seaplane_base'||a.type==='balloonport'||a.type==='closed'))continue;
-        const name=a.name||'';
-        if(SKIP.test(name))continue;
-        arr.push({icao:a.icao||k,iata,name,city:a.city||'',country:a.country||'',elevation:a.elevation||0,lat:a.lat,lon:a.lon,tz:a.tz||''});
-      }
-      if(arr.length>500){this.allAirports=arr;this._rebuildAirportPts();}
-    }).catch(()=>{});
-  }
-
-  _rebuildAirportPts(){
-    if(this.airportPoints){this.earth.remove(this.airportPoints);this.airportPoints.geometry.dispose();}
-    const N=this.allAirports.length,pos=new Float32Array(N*3),col=new Float32Array(N*3);
-    const big=new THREE.Color(0x7fd8e6),sm=new THREE.Color(0x355f78);
-    for(let i=0;i<N;i++){const a=this.allAirports[i];const v=a.vec||(a.vec=this.lonlatToVec3(a.lon,a.lat,this.R*1.004));pos[i*3]=v.x;pos[i*3+1]=v.y;pos[i*3+2]=v.z;const c=a.iata?big:sm;col[i*3]=c.r;col[i*3+1]=c.g;col[i*3+2]=c.b;}
-    const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));g.setAttribute('color',new THREE.BufferAttribute(col,3));
-    this.airportPoints=new THREE.Points(g,new THREE.PointsMaterial({size:2.2,vertexColors:true,transparent:true,opacity:.75,sizeAttenuation:false}));
-    this.earth.add(this.airportPoints);
-  }
-
-  _buildSelectionHelpers(){
-    const rt=this._ringTex();
-    this.selRing=new THREE.Sprite(new THREE.SpriteMaterial({map:rt,color:0xffffff,transparent:true,depthTest:false,opacity:.9}));
-    this.selRing.scale.set(9,9,1); this.selRing.visible=false; this.earth.add(this.selRing);
-    this.odSprites=[0,1].map(()=>{const s=new THREE.Sprite(new THREE.SpriteMaterial({map:rt,color:0xffb347,transparent:true,depthTest:false,opacity:.85}));s.scale.set(6,6,1);s.visible=false;this.earth.add(s);return s;});
-    this.routeArc=null;
-  }
-
-  async _buildContinents(){
-    try{
-      const topo=await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json').then(r=>r.json());
-      const feat=topojson.feature(topo,topo.objects.land);
-      const geos=feat.features?feat.features.map(f=>f.geometry):[feat.geometry];
-      const verts=[],R=this.R*1.003;
-      geos.forEach(g=>{if(!g)return;const polys=g.type==='Polygon'?[g.coordinates]:g.coordinates;polys.forEach(poly=>poly.forEach(ring=>{for(let i=0;i<ring.length-1;i++){const a=this.lonlatToVec3(ring[i][0],ring[i][1],R),b=this.lonlatToVec3(ring[i+1][0],ring[i+1][1],R);verts.push(a.x,a.y,a.z,b.x,b.y,b.z);}}));});
-      const bg=new THREE.BufferGeometry();bg.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
-      this.continentsLine=new THREE.LineSegments(bg,new THREE.LineBasicMaterial({color:0x2fd6a0,transparent:true,opacity:.5}));
-      this.earth.add(this.continentsLine);
-    }catch(e){console.warn('continents',e);}
-  }
-
-  _buildSatellite(){
-    if(this._satBuilt)return; this._satBuilt=true;
-    const maxAniso=this.renderer.capabilities.getMaxAnisotropy();
-    const vsh='varying vec2 vUv;varying vec3 vWN;void main(){vUv=uv;vWN=normalize(mat3(modelMatrix)*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}';
-    const mgr=new THREE.LoadingManager();mgr.onLoad=()=>{this._satReady=true;this._applyView();};
-    const loader=new THREE.TextureLoader(mgr);loader.setCrossOrigin('anonymous');
-    const setTexOpts=t=>{t.anisotropy=maxAniso;t.minFilter=THREE.LinearMipmapLinearFilter;t.magFilter=THREE.LinearFilter;t.generateMipmaps=true;};
-    const day=loader.load('https://cdn.jsdelivr.net/gh/turban/webgl-earth@master/images/2_no_clouds_4k.jpg');
-    const night=loader.load('https://unpkg.com/three-globe/example/img/earth-night.jpg');
-    [day,night].forEach(setTexOpts);
-    const mat=new THREE.ShaderMaterial({uniforms:{dayTex:{value:day},nightTex:{value:night},sunDir:this.sunDir},vertexShader:vsh,fragmentShader:'uniform sampler2D dayTex,nightTex;uniform vec3 sunDir;varying vec2 vUv;varying vec3 vWN;void main(){float d=dot(normalize(vWN),normalize(sunDir));float dy=smoothstep(-0.10,0.18,d);vec3 dc=texture2D(dayTex,vUv).rgb;vec3 nc=texture2D(nightTex,vUv).rgb;vec3 night=dc*0.09+nc*vec3(1.4,1.2,0.85)*1.8;vec3 col=mix(night,dc*1.15,dy);gl_FragColor=vec4(col,1.0);}'});
-    const m=new THREE.Mesh(new THREE.SphereGeometry(this.R,128,128),mat);m.visible=false;this.earth.add(m);this.satMeshes=[m];
-  }
-
-  _applyView(){
-    const sat=this._satReady;
-    [this.oceanMesh,this.continentsLine].forEach(m=>{if(m)m.visible=!sat;});
-    if(this.satMeshes)this.satMeshes.forEach(m=>{if(m)m.visible=sat;});
-  }
-
-  // ── Flights ─────────────────────────────────────────────────────────────────
-  altColor(t){
-    const stops=[[1,.48,.2],[1,.82,.4],[.36,.84,1]];
-    const seg=t<.5?[stops[0],stops[1],t*2]:[stops[1],stops[2],(t-.5)*2];
-    return new THREE.Color(...seg[0].map((v,i)=>v+(seg[1][i]-v)*seg[2]));
-  }
-  altProfile(p){return Math.min(Math.min(1,p/.08),Math.min(1,(1-p)/.08));}
-  altUnits(k){return .8+(k/45)*4.4;}
-  gc(f,t){t=Math.max(0,Math.min(1,t));const a=Math.sin((1-t)*f.omega)/f.sinOmega,b=Math.sin(t*f.omega)/f.sinOmega;return new THREE.Vector3(f.v0.x*a+f.v1.x*b,f.v0.y*a+f.v1.y*b,f.v0.z*a+f.v1.z*b).normalize();}
-
-  _buildFlights(){
-    const dot=this._dotTex();
-    for(let i=0;i<78;i++){
-      const al=this.AIRLINES[(Math.random()*this.AIRLINES.length)|0];
-      let o=this.AIRPORTS[(Math.random()*this.AIRPORTS.length)|0],d;
-      do{d=this.AIRPORTS[(Math.random()*this.AIRPORTS.length)|0];}while(d===o);
-      const v0=this.lonlatToVec3(o.lon,o.lat,1).normalize(),v1=this.lonlatToVec3(d.lon,d.lat,1).normalize();
-      const omega=Math.acos(Math.max(-1,Math.min(1,v0.dot(v1))));
-      const speed=420+Math.floor(Math.random()*130),cruise=30+Math.floor(Math.random()*12);
-      const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:dot,color:0xffffff,transparent:true,depthTest:true,opacity:1}));
-      sprite.scale.set(3.4,3.4,1);this.earth.add(sprite);
-      const TN=7,tgeo=new THREE.BufferGeometry();
-      tgeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(TN*3),3));
-      tgeo.setAttribute('color',new THREE.BufferAttribute(new Float32Array(TN*3),3));
-      const trail=new THREE.Line(tgeo,new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.85}));
-      this.earth.add(trail);
-      const num=100+Math.floor(Math.random()*8900);
-      const distKm=omega*6371;
-      const f={id:i,airline:al,color:al.color,flightNo:al.iata+num,callsign:al.icao+num,aircraft:this.AIRCRAFT[(Math.random()*this.AIRCRAFT.length)|0],origin:o,dest:d,v0,v1,omega,sinOmega:Math.sin(omega)||1e-6,distKm,speedKt:speed,cruiseK:cruise,progress:Math.random(),sprite,trail,TN,visible:true,totalHrs:distKm/(speed*1.852)};
-      this.flights.push(f);this.planeSprites.push(sprite);sprite.userData.fid=i;
+/* ---------------- Google Maps base layer ---------------- */
+async function loadGoogleBaseLayer() {
+  // Map Tiles API: create a session, then request 2D tiles with it.
+  const res = await fetch(
+    "https://tile.googleapis.com/v1/createSession?key=" + encodeURIComponent(GOOGLE_MAPS_API_KEY),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mapType: GOOGLE_MAP_TYPE, language: "en-US", region: "US" })
     }
-  }
+  );
+  if (!res.ok) throw new Error("createSession failed (" + res.status + ")");
+  const { session } = await res.json();
 
-  _updateFlights(dt){
-    const F=this._filters,R=this.R;
-    for(const f of this.flights){
-      f.progress+=dt/(f.totalHrs*3600/120);
-      if(f.progress>=1){
-        let o=this.AIRPORTS[(Math.random()*this.AIRPORTS.length)|0],d;
-        do{d=this.AIRPORTS[(Math.random()*this.AIRPORTS.length)|0];}while(d===o);
-        f.origin=o;f.dest=d;f.v0=this.lonlatToVec3(o.lon,o.lat,1).normalize();f.v1=this.lonlatToVec3(d.lon,d.lat,1).normalize();
-        f.omega=Math.acos(Math.max(-1,Math.min(1,f.v0.dot(f.v1))));f.sinOmega=Math.sin(f.omega)||1e-6;
-        f.distKm=f.omega*6371;f.totalHrs=f.distKm/(f.speedKt*1.852);f.progress=0;
-        const n=100+Math.floor(Math.random()*8900);f.flightNo=f.airline.iata+n;f.callsign=f.airline.icao+n;
-      }
-      f.curAltK=Math.max(.5,f.cruiseK*this.altProfile(f.progress));
-      const u=this.gc(f,f.progress);
-      f.pos=u.clone().multiplyScalar(R+this.altUnits(f.curAltK));f.sprite.position.copy(f.pos);
-      const ll=this.vecToLonLat(u),ll2=this.vecToLonLat(this.gc(f,Math.min(1,f.progress+.004)));
-      f.heading=this.bearing(ll,ll2);f.curLat=ll.lat;f.curLon=ll.lon;
-      const vis=F.airlines.has(f.airline.icao)&&f.curAltK>=F.altMin&&f.curAltK<=F.altMax&&this._regionMatch(ll.lat,ll.lon,F.region);
-      f.visible=vis;f.sprite.visible=vis;f.trail.visible=vis;
-      const isSel=f.id===this.selectedId;
-      const col=isSel?new THREE.Color(0xffffff):this.altColor(Math.min(1,f.curAltK/45));
-      f.sprite.material.color.copy(col);f.sprite.scale.setScalar(isSel?5:3.4);
-      if(vis){
-        const pa=f.trail.geometry.attributes.position.array,ca=f.trail.geometry.attributes.color.array;
-        for(let k=0;k<f.TN;k++){const tp=Math.max(0,f.progress-k*.012),ak=Math.max(.5,f.cruiseK*this.altProfile(tp)),v=this.gc(f,tp).multiplyScalar(R+this.altUnits(ak));pa[k*3]=v.x;pa[k*3+1]=v.y;pa[k*3+2]=v.z;const fd=1-k/f.TN;ca[k*3]=col.r*fd*.9;ca[k*3+1]=col.g*fd*.9;ca[k*3+2]=col.b*fd*.9;}
-        f.trail.geometry.attributes.position.needsUpdate=true;f.trail.geometry.attributes.color.needsUpdate=true;
-      }
-    }
-    const sel=this.selectedId!=null?this.flights[this.selectedId]:null;
-    if(sel&&sel.visible){this.selRing.visible=true;this.selRing.position.copy(sel.pos);const s=8+Math.sin(performance.now()/300)*1.6;this.selRing.scale.set(s,s,1);}
-    else this.selRing.visible=false;
-    if(this.selAirport&&this.airportRing.visible){const s=6+Math.sin(performance.now()/360)*1.3;this.airportRing.scale.set(s,s,1);}
-  }
-
-  _regionMatch(lat,lon,r){
-    if(r==='ALL')return true;
-    const B={NA:[15,72,-168,-52],SA:[-56,14,-82,-34],EU:[36,72,-25,45],AF:[-36,37,-20,52],AS:[5,75,45,150],OC:[-50,0,110,180]}[r];
-    return B?lat>=B[0]&&lat<=B[1]&&lon>=B[2]&&lon<=B[3]:true;
-  }
-
-  _updateSun(){
-    const now=new Date(),start=Date.UTC(now.getUTCFullYear(),0,0),doy=(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate())-start)/864e5;
-    const decl=-23.44*Math.cos(2*Math.PI*(doy+10)/365),subLon=(12-(now.getUTCHours()+now.getUTCMinutes()/60))*15;
-    this.sunDir.value.copy(this.lonlatToVec3(subLon,decl,1).normalize());
-  }
-
-  _animate(){
-    if(this._stop)return;
-    requestAnimationFrame(()=>this._animate());
-    const dt=Math.min(.1,this._clock.getDelta());
-    this._updateFlights(dt);
-    this._updateSun();
-    const d=this.camera.position.length();
-    this.controls.rotateSpeed=.1+.62*Math.max(0,Math.min(1,(d-128)/392));
-    if(this._focus){
-      this.camera.position.lerp(this._focus,.06);
-      if(this.camera.position.distanceTo(this._focus)<3){this._focus=null;setTimeout(()=>{if(!this._stop)this.controls.autoRotate=true;},2500);}
-    }
-    this.controls.update();
-    this.renderer.render(this.scene,this.camera);
-  }
-
-  // ── Interaction ─────────────────────────────────────────────────────────────
-  _setPtr(e){const r=this.renderer.domElement.getBoundingClientRect();this._pointer.x=((e.clientX-r.left)/r.width)*2-1;this._pointer.y=-((e.clientY-r.top)/r.height)*2+1;}
-  _pickFlight(e){this._setPtr(e);this.raycaster.setFromCamera(this._pointer,this.camera);const hits=this.raycaster.intersectObjects(this.planeSprites.filter(s=>s.visible),false);return hits.length?hits[0].object.userData.fid:null;}
-  _pickGlobe(e){
-    this._setPtr(e);this.raycaster.setFromCamera(this._pointer,this.camera);
-    const meshes=[];if(this.oceanMesh?.visible)meshes.push(this.oceanMesh);if(this.satMeshes?.[0]?.visible)meshes.push(this.satMeshes[0]);
-    const hits=this.raycaster.intersectObjects(meshes,false);return hits.length?hits[0].point.clone():null;
-  }
-  _nearestAirport(lat,lon,max){
-    let best=null,bestD=max;const cl=Math.cos(lat*Math.PI/180);
-    for(const a of this.allAirports){let dL=a.lon-lon;if(dL>180)dL-=360;if(dL<-180)dL+=360;const d=Math.sqrt((a.lat-lat)**2+(dL*cl)**2);if(d<bestD){bestD=d;best=a;}}
-    return best;
-  }
-
-  _handleClick(e){
-    const fid=this._pickFlight(e);
-    if(fid!=null){this.selectFlight(fid,true);return;}
-    const pt=this._pickGlobe(e);
-    if(pt){const ll=this.vecToLonLat(pt),thr=Math.max(.7,3.4*(this.camera.position.length()/285)),ap=this._nearestAirport(ll.lat,ll.lon,thr);if(ap){this.selectAirport(ap);return;}}
-    if(this.selectedId!=null)this.selectFlight(null);
-    else if(this.selAirport)this.clearAirport();
-  }
-
-  _handleHover(e){
-    const t=Date.now();if(t-this._lastHover<45)return;this._lastHover=t;
-    const fid=this._pickFlight(e);
-    if(fid!=null){
-      const f=this.flights[fid];this.renderer.domElement.style.cursor='pointer';
-      const r=this.renderer.domElement.getBoundingClientRect();
-      this.tooltip.style.display='block';this.tooltip.style.left=(e.clientX-r.left)+'px';this.tooltip.style.top=(e.clientY-r.top)+'px';
-      this.tooltip.innerHTML=`<span style="color:#41c7c7">${f.callsign}</span>  ${f.origin.iata}→${f.dest.iata}`;
-    } else {
-      this.renderer.domElement.style.cursor=this._down?'grabbing':'grab';
-      this.tooltip.style.display='none';
-    }
-  }
-
-  // ── Flight selection ────────────────────────────────────────────────────────
-  selectFlight(id,focus){
-    this.selectedId=id;
-    if(this.routeArc){this.earth.remove(this.routeArc);this.routeArc.geometry.dispose();this.routeArc=null;}
-    this.odSprites.forEach(s=>s.visible=false);
-    this.airportRing.visible=false;this.selAirport=null;
-    document.getElementById('airportDetail').style.display='none';
-    if(id==null){this.selRing.visible=false;document.getElementById('flightDetail').style.display='none';return;}
-    const f=this.flights[id];
-    const pts=[];for(let k=0;k<=96;k++)pts.push(this.gc(f,k/96).multiplyScalar(this.R+1.2));
-    const g=new THREE.BufferGeometry().setFromPoints(pts);
-    this.routeArc=new THREE.Line(g,new THREE.LineBasicMaterial({color:0xffb347,transparent:true,opacity:.7}));
-    this.earth.add(this.routeArc);
-    this.odSprites[0].position.copy(f.v0.clone().multiplyScalar(this.R+1));this.odSprites[0].visible=true;
-    this.odSprites[1].position.copy(f.v1.clone().multiplyScalar(this.R+1));this.odSprites[1].visible=true;
-    if(focus&&f.pos){this._focus=f.pos.clone().normalize().multiplyScalar(178);this.controls.autoRotate=false;}
-    document.getElementById('flightDetail').style.display='block';
-    this._refreshSelected();
-    clearInterval(this._selInterval);
-    this._selInterval=setInterval(()=>{if(this.selectedId!=null)this._refreshSelected();},800);
-  }
-
-  _refreshSelected(){
-    const f=this.flights[this.selectedId];if(!f)return;
-    const p3=n=>String(Math.round(n)).padStart(3,'0'),z=n=>String(n).padStart(2,'0');
-    const now=Date.now(),dep=now-f.progress*f.totalHrs*3600000,arr=dep+f.totalHrs*3600000;
-    const remH=(1-f.progress)*f.totalHrs,hh=Math.floor(remH),mm=Math.round((remH-hh)*60);
-    const fmt=e=>{const d=new Date(e);return z(d.getUTCHours())+':'+z(d.getUTCMinutes());};
-    const pct=Math.round(f.progress*100);
-    const status=f.progress<.08?'CLIMB':f.progress>.92?'DESCENT':'EN ROUTE';
-    document.getElementById('fdAccent').style.cssText=`width:4px;flex-shrink:0;background:${f.color};box-shadow:0 0 12px ${f.color};`;
-    document.getElementById('fdStatus').textContent=status;
-    document.getElementById('fdCallsign').textContent=f.callsign;
-    document.getElementById('fdFlightInfo').textContent=`${f.flightNo} · ${f.airline.name}`;
-    document.getElementById('fdOriginCode').textContent=f.origin.iata;
-    document.getElementById('fdOriginCity').textContent=f.origin.city;
-    document.getElementById('fdDestCode').textContent=f.dest.iata;
-    document.getElementById('fdDestCity').textContent=f.dest.city;
-    document.getElementById('fdProgressBar').style.width=pct+'%';
-    document.getElementById('fdProgressDot').style.left=pct+'%';
-    document.getElementById('fdDepTime').textContent=fmt(dep);
-    document.getElementById('fdArrTime').textContent=fmt(arr);
-    document.getElementById('fdEta').textContent=`${hh}h ${z(mm)}m LEFT`;
-    document.getElementById('fdAlt').textContent='FL'+p3(f.curAltK*10);
-    document.getElementById('fdSpd').textContent=Math.round(f.speedKt)+' kt';
-    document.getElementById('fdHdg').textContent=p3(f.heading)+'°';
-    document.getElementById('fdAircraft').textContent=f.aircraft;
-    document.getElementById('fdDist').textContent=Math.round(f.distKm).toLocaleString()+' km';
-  }
-
-  computeStats(){}
-
-  renderAirlines(){}
-  renderRegions(){}
-
-  // ── Airport panel ────────────────────────────────────────────────────────────
-  _simRand(seed){let s=Math.abs(seed)%233280||1;return()=>{s=(s*9301+49297)%233280;return s/233280;};}
-  _simWeather(a){
-    const r=this._simRand((a.lat*73+a.lon*131)|0),cold=Math.max(0,(Math.abs(a.lat)-22)/68);
-    const temp=Math.round(31-cold*46+(r()-.5)*12);
-    const conds=['CLEAR','FEW CLOUDS','SCATTERED','OVERCAST','LIGHT RAIN','RAIN','FOG','THUNDERSTORM','SNOW'];
-    let ci=Math.floor(r()*6);if(cold>.55&&r()>.45)ci=8;if(temp<1&&ci<8&&r()>.5)ci=8;
-    const wind=Math.round(3+r()*30),cond=conds[ci];
-    const vis=(cond==='FOG'?.3+r()*1.4:['SNOW','THUNDERSTORM','RAIN'].includes(cond)?2+r()*4:7+r()*3).toFixed(1);
-    let lvl=0;if(['OVERCAST','LIGHT RAIN','RAIN'].includes(cond))lvl=1;if(['FOG','SNOW'].includes(cond))lvl=2;if(cond==='THUNDERSTORM')lvl=3;if(wind>26)lvl=Math.max(lvl,2);
-    return{temp:temp+'°C',cond,wind:wind+' kt',vis:vis+' km',status:['NORMAL OPS','MINOR DELAYS','SIGNIFICANT DELAYS','MAJOR DISRUPTION'][lvl],color:['#2fd6a0','#ffd166','#ff8c42','#ff5c5c'][lvl],pct:[14,42,70,93][lvl]};
-  }
-  _simBoard(a,kind){
-    const r=this._simRand((a.lat*17+a.lon*31+(kind==='DEP'?7:13))|0),now=Date.now(),out=[],z=n=>String(n).padStart(2,'0');
-    const sts=[['ON TIME','#2fd6a0'],['ON TIME','#2fd6a0'],['ON TIME','#2fd6a0'],['BOARDING','#41c7c7'],['DELAYED','#ff8c42'],['DELAYED','#ff8c42'],[kind==='ARR'?'LANDED':'DEPARTED','#7e93a6'],['CANCELLED','#ff5c5c']];
-    for(let i=0;i<10;i++){
-      const al=this.AIRLINES[Math.floor(r()*this.AIRLINES.length)],o=this.AIRPORTS[Math.floor(r()*this.AIRPORTS.length)];
-      const t=now+((kind==='DEP'?i*16-40:i*15-30)+Math.floor(r()*8))*60000,d=new Date(t),s=sts[Math.floor(r()*sts.length)];
-      out.push({time:z(d.getUTCHours())+':'+z(d.getUTCMinutes()),flight:al.iata+(100+Math.floor(r()*8900)),code:o.iata,city:o.city,arrow:kind==='DEP'?'→':'←',status:s[0],color:s[1]});
-    }
-    return out.sort((x,y)=>x.time<y.time?-1:1);
-  }
-
-  selectAirport(a){
-    this.selectFlight(null);this.selAirport=a;
-    this.airportRing.visible=true;this.airportRing.position.copy(a.vec||this.lonlatToVec3(a.lon,a.lat,this.R*1.004));
-    this._focus=(a.vec||this.lonlatToVec3(a.lon,a.lat,1)).clone().normalize().multiplyScalar(162);
-    this.controls.autoRotate=false;
-    const w=this._simWeather(a);
-    let local='—';try{if(a.tz)local=new Intl.DateTimeFormat('en-GB',{timeZone:a.tz,hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date());}catch(e){}
-    const has=!!a.iata;
-    document.getElementById('apIata').textContent=a.iata||a.icao||'—';
-    document.getElementById('apName').textContent=a.name||'Unknown Airport';
-    document.getElementById('apSub').textContent=`${a.icao||'—'} · ${a.city||''} ${a.country||''}`;
-    document.getElementById('apPhotoLabel').textContent=a.iata||a.icao||'APT';
-    document.getElementById('apLocalTime').textContent=local+' LOCAL';
-    document.getElementById('apWeatherStatus').textContent=w.status;
-    document.getElementById('apWeatherStatus').style.color=w.color;
-    document.getElementById('apWeatherStatus').style.borderColor=w.color;
-    document.getElementById('apTemp').textContent=w.temp;document.getElementById('apWind').textContent=w.wind;document.getElementById('apVis').textContent=w.vis;
-    document.getElementById('apCond').textContent=w.cond;
-    document.getElementById('apDisruptBar').style.width=w.pct+'%';document.getElementById('apDisruptBar').style.background=w.color;
-    document.getElementById('apElev').textContent=Math.round(a.elevation||0).toLocaleString()+' ft';
-    document.getElementById('apCoords').textContent=a.lat.toFixed(3)+'°, '+a.lon.toFixed(3)+'°';
-    document.getElementById('apTz').textContent=a.tz||'—';
-    document.getElementById('apBoardWrap').style.display=has?'block':'none';
-    document.getElementById('apNoService').style.display=has?'none':'block';
-    if(has){
-      const renderBoard=(id,rows)=>{
-        const el=document.getElementById(id);el.innerHTML='';
-        rows.forEach(d=>{const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid rgba(65,150,255,.06);';row.innerHTML=`<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#dfe9f2;width:38px;">${d.time}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9fc0dd;width:52px;">${d.flight}</span><span style="flex:1;min-width:0;font-size:11px;color:#7e93a6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${d.arrow} ${d.code} ${d.city}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:${d.color};white-space:nowrap;">${d.status}</span>`;el.appendChild(row);});
-      };
-      renderBoard('apDepartures',this._simBoard(a,'DEP'));
-      renderBoard('apArrivals',this._simBoard(a,'ARR'));
-    }
-    document.getElementById('airportDetail').style.display='block';
-  }
-
-  clearAirport(){this.selAirport=null;this.airportRing.visible=false;document.getElementById('airportDetail').style.display='none';}
-
-  // ── Search ───────────────────────────────────────────────────────────────────
-  onSearch(q){
-    const si=document.getElementById('searchInput');si.value=q;
-    document.getElementById('searchClear').style.display=q?'inline':'none';
-    const Q=q.trim().toUpperCase(),results=[];
-    if(Q.length>=1){
-      for(const f of this.flights){
-        if(f.callsign.includes(Q)||f.flightNo.includes(Q)||f.origin.iata.includes(Q)||f.dest.iata.includes(Q)){results.push({badge:f.airline.iata,primary:`${f.callsign} · ${f.flightNo}`,secondary:`${f.origin.iata} → ${f.dest.iata}  ·  ${f.aircraft}`,type:'flight',id:f.id});}
-        if(results.length>=6)break;
-      }
-      for(const a of this.AIRPORTS){
-        if(a.iata.includes(Q)||a.city.toUpperCase().includes(Q)){results.push({badge:'APT',primary:`${a.iata} · ${a.city}`,secondary:'AIRPORT',type:'airport',airport:a});}
-        if(results.length>=10)break;
-      }
-    }
-    const wrap=document.getElementById('searchResults');
-    if(!results.length){wrap.style.display='none';return;}
-    wrap.style.display='block';wrap.innerHTML='';
-    results.forEach(r=>{
-      const d=document.createElement('div');
-      d.style.cssText='display:flex;align-items:center;gap:11px;padding:11px 13px;border-bottom:1px solid rgba(65,150,255,.06);cursor:pointer;';
-      d.innerHTML=`<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;padding:2px 6px;border:1px solid rgba(65,199,199,.4);color:#41c7c7;border-radius:3px;min-width:34px;text-align:center;">${r.badge}</span><div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${r.primary}</div><div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#6b7c8f;">${r.secondary}</div></div>`;
-      d.onmouseenter=()=>d.style.background='rgba(65,150,255,.08)';d.onmouseleave=()=>d.style.background='';
-      d.onclick=()=>{if(r.type==='flight'){this.selectFlight(r.id,true);si.value=this.flights[r.id].callsign;}else{this._focus=r.airport.vec.clone().normalize().multiplyScalar(178);this.controls.autoRotate=false;si.value=r.airport.iata;}wrap.style.display='none';};
-      wrap.appendChild(d);
-    });
-  }
-
-  // ── UI bindings ──────────────────────────────────────────────────────────────
-  _bindUI(){
-    document.getElementById('fdClose').onclick=()=>this.selectFlight(null);
-    document.getElementById('apClose').onclick=()=>this.clearAirport();
-    document.getElementById('searchClear').onclick=()=>this.onSearch('');
-    const si=document.getElementById('searchInput');
-    si.oninput=()=>this.onSearch(si.value);
-    si.onkeydown=e=>{if(e.key==='Escape'){this.onSearch('');si.blur();};};
-    document.addEventListener('click',e=>{const sr=document.getElementById('searchResults');if(!sr.contains(e.target)&&e.target!==si)sr.style.display='none';});
-    document.getElementById('fdClose').onmouseenter=e=>e.target.style.color='#e7eef5';
-    document.getElementById('fdClose').onmouseleave=e=>e.target.style.color='#5f7488';
-    document.getElementById('apClose').onmouseenter=e=>e.target.style.color='#e7eef5';
-    document.getElementById('apClose').onmouseleave=e=>e.target.style.color='#5f7488';
-  }
-
-  _startClock(){
-    const tick=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');document.getElementById('utcClock').textContent=p(d.getUTCHours())+':'+p(d.getUTCMinutes())+':'+p(d.getUTCSeconds());};
-    tick();setInterval(tick,1000);
-    setInterval(()=>{this.computeStats();if(this.selectedId!=null)this._refreshSelected();},800);
-  }
+  const provider = new Cesium.UrlTemplateImageryProvider({
+    url: "https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}"
+       + "?session=" + encodeURIComponent(session)
+       + "&key=" + encodeURIComponent(GOOGLE_MAPS_API_KEY),
+    tilingScheme: new Cesium.WebMercatorTilingScheme(),
+    maximumLevel: 22,
+    credit: new Cesium.Credit("Map data © Google")
+  });
+  viewer.imageryLayers.addImageryProvider(provider);
 }
 
-window.app=new AeroNav();
+// Fallback imagery shipped inside the Cesium build itself (no extra CDN).
+async function loadFallbackLayer() {
+  const provider = await Cesium.TileMapServiceImageryProvider.fromUrl(
+    Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII")
+  );
+  viewer.imageryLayers.addImageryProvider(provider);
+}
+
+function showNotice(html) {
+  const el = document.getElementById("notice");
+  el.innerHTML = html;
+  el.style.display = "block";
+}
+
+(async function initImagery() {
+  const keyMissing = !GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === "YOUR_GOOGLE_MAPS_API_KEY";
+  if (keyMissing) {
+    await loadFallbackLayer();
+    showNotice("<strong>Google Maps key not set.</strong><br>Showing fallback imagery. Add your Map Tiles API key to <code>GOOGLE_MAPS_API_KEY</code> in index.html to enable Google Maps.");
+  } else {
+    try {
+      await loadGoogleBaseLayer();
+    } catch (err) {
+      console.error("Google Maps base layer failed:", err);
+      await loadFallbackLayer();
+      showNotice("<strong>Google Maps unavailable.</strong><br>" + err.message + " — showing fallback imagery. Check that the Map Tiles API is enabled for your key.");
+    }
+  }
+  hideLoader();
+})();
+
+/* ---------------- Loader / hint ---------------- */
+function hideLoader() {
+  const loader = document.getElementById("loader");
+  loader.style.opacity = "0";
+  setTimeout(() => loader.remove(), 650);
+
+  const hint = document.getElementById("hint");
+  setTimeout(() => { hint.style.opacity = "0"; }, 6000);
+}
+
+/* ---------------- Controls ---------------- */
+function cameraHeight() {
+  return viewer.camera.positionCartographic.height;
+}
+function zoom(factor) {
+  const amount = cameraHeight() * factor;
+  if (factor > 0) viewer.camera.zoomIn(amount);
+  else viewer.camera.zoomOut(-amount);
+}
+function tilt(deltaDeg) {
+  const cam = viewer.camera;
+  const pitch = Cesium.Math.clamp(
+    cam.pitch + Cesium.Math.toRadians(deltaDeg),
+    Cesium.Math.toRadians(-90),
+    Cesium.Math.toRadians(-5)
+  );
+  cam.setView({ orientation: { heading: cam.heading, pitch, roll: 0 } });
+}
+
+document.getElementById("zoomIn").addEventListener("click", () => zoom(0.4));
+document.getElementById("zoomOut").addEventListener("click", () => zoom(-0.6));
+document.getElementById("tiltUp").addEventListener("click", () => tilt(10));
+document.getElementById("tiltDown").addEventListener("click", () => tilt(-10));
+document.getElementById("home").addEventListener("click", () => {
+  viewer.camera.flyTo({ ...HOME_VIEW, duration: 1.6 });
+});
+
+// Keyboard shortcuts: +/- zoom, arrows tilt, H home
+window.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  switch (e.key) {
+    case "+": case "=": zoom(0.4); break;
+    case "-": case "_": zoom(-0.6); break;
+    case "ArrowUp":   if (e.shiftKey) { tilt(10);  e.preventDefault(); } break;
+    case "ArrowDown": if (e.shiftKey) { tilt(-10); e.preventDefault(); } break;
+    case "h": case "H": viewer.camera.flyTo({ ...HOME_VIEW, duration: 1.6 }); break;
+  }
+});
 </script>
 </body>
 </html>
