@@ -1,0 +1,9 @@
+server.py
+worker.js
+wrangler.jsonc
+supabase
+docs
+test
+.claude
+.vscode
+.assetsignore
