@@ -220,10 +220,33 @@
 <!-- Branding -->
 <div class="brand" aria-label="AeroNav3D">
   <svg width="34" height="34" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-    <circle cx="17" cy="17" r="13" stroke="#4cc3ff" stroke-width="1.4"/>
-    <ellipse cx="17" cy="17" rx="13" ry="5.2" stroke="#4cc3ff" stroke-width="1" opacity=".55"/>
-    <path d="M17 4v26M4 17h26" stroke="#4cc3ff" stroke-width=".7" opacity=".35"/>
-    <path d="M23.5 10.5 15 19l-3.4-1.4-1.6 1.6 3.6 1.8 1.8 3.6 1.6-1.6L15.6 19l8.5-8.5-.6-.6Z" fill="#dfe7f1"/>
+    <defs>
+      <radialGradient id="brandSphere" cx="35%" cy="28%" r="85%">
+        <stop offset="0%" stop-color="#28324b"/>
+        <stop offset="55%" stop-color="#0b101e"/>
+        <stop offset="100%" stop-color="#04060b"/>
+      </radialGradient>
+      <linearGradient id="brandArrowTop" x1="9" y1="21" x2="25" y2="9" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stop-color="#8f9aab"/>
+        <stop offset="55%" stop-color="#e8edf5"/>
+        <stop offset="100%" stop-color="#ffffff"/>
+      </linearGradient>
+      <linearGradient id="brandArrowBot" x1="14" y1="26" x2="25" y2="9" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stop-color="#525c6c"/>
+        <stop offset="100%" stop-color="#c7d0dc"/>
+      </linearGradient>
+      <clipPath id="brandClip"><circle cx="17" cy="17" r="15"/></clipPath>
+      <filter id="brandGlow" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur stdDeviation="1.1"/>
+      </filter>
+    </defs>
+    <circle cx="17" cy="17" r="15" fill="url(#brandSphere)"/>
+    <circle cx="17" cy="17" r="15" stroke="#8fbaff" stroke-width="1.5" opacity=".5" filter="url(#brandGlow)"/>
+    <g clip-path="url(#brandClip)">
+      <path d="M25.2 8.8 9 21l8-2.6Z" fill="url(#brandArrowTop)"/>
+      <path d="M25.2 8.8 17 18.4l-2.6 7.2Z" fill="url(#brandArrowBot)"/>
+    </g>
+    <circle cx="17" cy="17" r="15" stroke="#eaf3ff" stroke-width=".7" opacity=".75"/>
   </svg>
   <div>
     <div class="name">Aero<em>Nav</em>3D</div>
