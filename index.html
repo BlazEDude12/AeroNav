@@ -163,6 +163,22 @@
     border-radius:6px;text-decoration:none;
   }
   .panel-photo a:hover{background:rgba(0,0,0,.75);}
+  .ph-nav{
+    position:absolute;top:50%;transform:translateY(-50%);left:8px;
+    width:28px;height:28px;border-radius:50%;border:none;cursor:pointer;
+    display:none;align-items:center;justify-content:center;
+    background:rgba(10,14,22,.55);color:#fff;font-size:17px;line-height:1;
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+    transition:background .15s;padding-bottom:2px;
+  }
+  .ph-nav.next{left:auto;right:8px;}
+  .ph-nav:hover{background:rgba(10,14,22,.85);}
+  .ph-count{
+    position:absolute;left:8px;bottom:6px;display:none;
+    font-size:9px;letter-spacing:.08em;color:rgba(255,255,255,.9);
+    background:rgba(10,14,22,.55);border-radius:6px;padding:2px 7px;
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  }
   .panel-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;padding:14px 16px;}
   .panel-grid span{display:block;font-size:10px;letter-spacing:.18em;color:var(--muted);}
   .panel-grid b{font-size:17px;font-weight:600;}
@@ -389,6 +405,9 @@
   </div>
   <div class="panel-photo" id="fpPhotoWrap">
     <img id="fpPhoto" alt="Aircraft photo">
+    <button class="ph-nav" id="fpPhotoPrev" aria-label="Previous photo">‹</button>
+    <button class="ph-nav next" id="fpPhotoNext" aria-label="Next photo">›</button>
+    <span class="ph-count" id="fpPhotoCount"></span>
     <a id="fpPhotoCredit" target="_blank" rel="noopener"></a>
   </div>
   <div class="panel-grid">
@@ -957,36 +976,125 @@ function airlineFor(callsign) {
   const prefix = /^[A-Z]{3}/.exec(callsign)?.[0];
   return (prefix && AIRLINES[prefix]) || null; // [iata, name] or null
 }
-/* Aircraft photo from the Planespotters.net public API (free; photographer
-   credit + link back required). Cached per airframe so the 1 s panel
-   refresher and re-selections never re-request. */
+/* Aircraft photo carousel. Two free sources are merged per airframe:
+   Planespotters.net (public API, one curated photo — credit + link
+   required) and Wikimedia Commons (per-registration categories, several
+   CC-licensed photos at full quality). Cached per airframe. */
 const fpPhotoWrap = document.getElementById("fpPhotoWrap");
 const fpPhoto = document.getElementById("fpPhoto");
 const fpPhotoCredit = document.getElementById("fpPhotoCredit");
-const photoCache = new Map(); // hex -> first photo object, or null if none
-let photoHex = null;
-async function updateAircraftPhoto(rawHex) {
-  const hex = (rawHex || "").replace(/[^0-9a-f]/gi, ""); // strip TIS-B "~" prefix
+const fpPhotoPrev = document.getElementById("fpPhotoPrev");
+const fpPhotoNext = document.getElementById("fpPhotoNext");
+const fpPhotoCount = document.getElementById("fpPhotoCount");
+const photoCache = new Map(); // hex -> [{src, credit, link}]
+let photoHex = null, photoList = [], photoIdx = 0;
+function renderPanelPhoto() {
+  if (!photoList.length) { fpPhotoWrap.style.display = "none"; return; }
+  const p = photoList[photoIdx];
+  fpPhoto.src = p.src;
+  fpPhotoCredit.textContent = p.credit;
+  fpPhotoCredit.href = p.link;
+  const multi = photoList.length > 1;
+  fpPhotoCount.textContent = `${photoIdx + 1} / ${photoList.length}`;
+  fpPhotoPrev.style.display = fpPhotoNext.style.display = multi ? "flex" : "none";
+  fpPhotoCount.style.display = multi ? "block" : "none";
+  fpPhotoWrap.style.display = "block";
+}
+async function updateAircraftPhoto(ac) {
+  const hex = (ac.hex || "").replace(/[^0-9a-f]/gi, ""); // strip TIS-B "~" prefix
   if (hex === photoHex) return;
   photoHex = hex;
+  photoList = []; photoIdx = 0;
   fpPhotoWrap.style.display = "none";
   if (!hex) return;
   if (!photoCache.has(hex)) {
-    let photo = null;
+    const reg = (ac.r || "").trim();
+    // Registrations get reused across airframes (Singapore's 9V-SM* flew on
+    // 747s before today's A350s), so photos older than this airframe's build
+    // year are someone else's plane — filter them out when the year is known.
+    let builtYear = null;
     try {
-      const res = await fetch(`https://api.planespotters.net/pub/photos/hex/${hex}`);
-      photo = (await res.json()).photos?.[0] ?? null;
-    } catch (e) { /* offline/rate-limited: treat as no photo */ }
-    photoCache.set(hex, photo);
+      const shard = await fetch(`db/ac/${hex.slice(0, 2)}.json`)
+        .then(r => r.ok ? r.json() : null);
+      builtYear = parseInt(shard?.[hex.slice(2)]?.[1], 10) || null;
+    } catch (e) {}
+    const common = "prop=imageinfo&iiprop=url|mime|extmetadata" +
+      "&iiurlwidth=700&format=json&origin=*";
+    const api = "https://commons.wikimedia.org/w/api.php?action=query";
+    const catUrl = `${api}&generator=categorymembers` +
+      `&gcmtitle=${encodeURIComponent(`Category:${reg} (aircraft)`)}` +
+      `&gcmtype=file&gcmlimit=10&${common}`;
+    const searchUrl = `${api}&generator=search` +
+      `&gsrsearch=${encodeURIComponent(`intitle:"${reg}"`)}` +
+      `&gsrnamespace=6&gsrlimit=10&${common}`;
+    const [ps, cat, srch] = await Promise.allSettled([
+      fetch(`https://api.planespotters.net/pub/photos/hex/${hex}`).then(r => r.json()),
+      reg ? fetch(catUrl).then(r => r.json()) : Promise.reject(new Error("no reg")),
+      reg ? fetch(searchUrl).then(r => r.json()) : Promise.reject(new Error("no reg")),
+    ]);
+    const list = [];
+    if (ps.status === "fulfilled")
+      for (const p of ps.value?.photos || []) list.push({
+        src: p.thumbnail_large?.src || p.thumbnail?.src,
+        credit: `© ${p.photographer} · Planespotters.net`,
+        link: p.link
+      });
+    const pages = {}; // merge category + search hits, deduped by page id
+    for (const res of [cat, srch])
+      if (res.status === "fulfilled")
+        Object.assign(pages, res.value?.query?.pages || {});
+    const strip = document.createElement("div");
+    const commons = [];
+    const regUp = reg.toUpperCase();
+    for (const page of Object.values(pages)) {
+      const ii = page.imageinfo?.[0];
+      if (!ii?.thumburl || !/^image\/(jpeg|png)/.test(ii.mime || "")) continue;
+      const md = ii.extmetadata || {};
+      const dateStr = md.DateTimeOriginal?.value || md.DateTime?.value || "";
+      const year = parseInt(/(19|20)\d\d/.exec(dateStr)?.[0], 10) || null;
+      const regInTitle = regUp && (page.title || "").toUpperCase().includes(regUp);
+      // A photo provably belongs to THIS airframe only if its date is at or
+      // after the build year. When that check isn't possible (no build year
+      // on file, or undated photo), require the registration in the filename
+      // as the next-best signal and accept the residual reuse risk.
+      if (year && builtYear) {
+        if (year < builtYear) continue;
+      } else if (!regInTitle) continue;
+      strip.innerHTML = md.Artist?.value || "";
+      const artist = strip.textContent.trim().slice(0, 32) || "Wikimedia contributor";
+      commons.push({
+        src: ii.thumburl,
+        credit: `© ${artist} · Wikimedia Commons`,
+        link: ii.descriptionurl || ii.url,
+        year
+      });
+    }
+    commons.sort((a, b) => (b.year || 0) - (a.year || 0)); // newest livery first
+    // Photos of the current holder of a reused registration cluster recent;
+    // anything a decade older than the newest shot is likely a predecessor.
+    const newest = commons.find(p => p.year)?.year;
+    list.push(...commons.filter(p => !newest || !p.year || newest - p.year <= 10));
+    // Keep it tight: the curated Planespotters shot + the latest Commons photos
+    photoCache.set(hex, list.filter(p => p.src).slice(0, 3));
     if (photoHex !== hex) return; // selection changed while loading
   }
-  const photo = photoCache.get(hex);
-  if (!photo) return;
-  fpPhoto.src = photo.thumbnail_large?.src || photo.thumbnail?.src || "";
-  fpPhotoCredit.textContent = `© ${photo.photographer} · Planespotters.net`;
-  fpPhotoCredit.href = photo.link;
-  fpPhotoWrap.style.display = "block";
+  photoList = photoCache.get(hex).slice();
+  photoIdx = 0;
+  renderPanelPhoto();
 }
+fpPhotoPrev.addEventListener("click", () => {
+  photoIdx = (photoIdx - 1 + photoList.length) % photoList.length;
+  renderPanelPhoto();
+});
+fpPhotoNext.addEventListener("click", () => {
+  photoIdx = (photoIdx + 1) % photoList.length;
+  renderPanelPhoto();
+});
+fpPhoto.addEventListener("error", () => { // drop photos that fail to load
+  photoList.splice(photoIdx, 1);
+  if (photoIdx >= photoList.length) photoIdx = 0;
+  renderPanelPhoto();
+});
 /* Aircraft details: MSN + build year come from local JSON shards under
    db/ac/ (trimmed from OpenSky's aircraft database, keyed by hex prefix);
    country of registration comes from the adsbdb.com public API. Both are
@@ -1052,7 +1160,7 @@ function fmtAlt(ac, dtSec) {
 function updateFlightPanel(ac) {
   const callsign = (ac.flight || "").trim() || ac.hex.toUpperCase();
   updateAirlineLogo(callsign);
-  updateAircraftPhoto(ac.hex);
+  updateAircraftPhoto(ac);
   updateAircraftMeta(ac.hex);
   const airline = airlineFor(callsign);
   const rec = flights.get(ac.hex);

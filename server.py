@@ -8,12 +8,26 @@ CORS headers, so the browser cannot call it directly.
 Usage: python server.py  (serves on http://localhost:8321)
 """
 import json
+import ssl
 import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 PORT = 8321
 UPSTREAM = "https://re-api.adsb.lol/"
+
+
+def _urlopen(req, timeout=10):
+    """urlopen that tolerates macOS Pythons missing their CA bundle."""
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.URLError as exc:
+        if "CERTIFICATE_VERIFY_FAILED" not in str(exc):
+            raise
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return urllib.request.urlopen(req, timeout=timeout, context=ctx)
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -26,7 +40,7 @@ class Handler(SimpleHTTPRequestHandler):
                 UPSTREAM + ("?" + url.query if url.query else ""),
                 headers={"User-Agent": "AeroNav3D/1.0 (local proxy)"},
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with _urlopen(req) as resp:
                 body = resp.read()
             self._send_json(200, body)
         except Exception as exc:  # upstream down, timeout, non-feeder IP, ...
