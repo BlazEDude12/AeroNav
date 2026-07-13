@@ -646,32 +646,54 @@ const PLANE_SELECTED = Cesium.Color.fromCssColorString("#4cc3ff");
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-/* ----- Flight trail: recent path of the selected plane ----- */
+/* ----- Flight trail: altitude-coloured recent path (FR24-style) -----
+ * Each vertex is tinted by the plane's altitude there — yellow near the
+ * ground, through green and cyan, to deep blue at cruise — so climbs and
+ * descents read as a smooth gradient along the line. */
 const TRAIL_GAP_MS = 5 * 60 * 1000;  // data gaps longer than this break the line
-let trailEntities = [];              // all polyline entities of the current trail
+let trailPrimitives = [];            // static history segments
+let livePrimitive = null;            // rebuilt as the live segment grows
 let trailPositions = [];             // live segment; grows as new polls arrive
+let trailAlts = [];                  // matching altitudes (ft) per position
 let trailHex = null;
 
+function altitudeColor(altFt) {
+  const t = Math.min(Math.max(altFt || 0, 0), 38000) / 38000;
+  // hue sweeps 55° (yellow) → 240° (blue) with altitude
+  return Cesium.Color.fromHsl((55 + t * 185) / 360, 0.9, 0.55, 0.95);
+}
+
+function makeTrailPrimitive(positions, altsFt) {
+  return viewer.scene.primitives.add(new Cesium.Primitive({
+    geometryInstances: new Cesium.GeometryInstance({
+      geometry: new Cesium.PolylineGeometry({
+        positions,
+        width: 5,
+        colors: altsFt.map(altitudeColor),
+        colorsPerVertex: true,
+        vertexFormat: Cesium.PolylineColorAppearance.VERTEX_FORMAT
+      })
+    }),
+    appearance: new Cesium.PolylineColorAppearance(),
+    asynchronous: false
+  }));
+}
+
 function clearTrail() {
-  trailEntities.forEach((e) => viewer.entities.remove(e));
-  trailEntities = [];
+  trailPrimitives.forEach((p) => viewer.scene.primitives.remove(p));
+  if (livePrimitive) viewer.scene.primitives.remove(livePrimitive);
+  trailPrimitives = [];
+  livePrimitive = null;
   trailPositions = [];
+  trailAlts = [];
   trailHex = null;
 }
 
-function addTrailSegment(positions) {
-  const entity = viewer.entities.add({
-    polyline: {
-      positions,
-      width: 5,
-      material: new Cesium.PolylineGlowMaterialProperty({
-        glowPower: 0.25,
-        color: PLANE_SELECTED.withAlpha(0.85)
-      })
-    }
-  });
-  trailEntities.push(entity);
-  return entity;
+function rebuildLiveTrail() {
+  if (livePrimitive) viewer.scene.primitives.remove(livePrimitive);
+  livePrimitive = trailPositions.length > 1
+    ? makeTrailPrimitive(trailPositions, trailAlts)
+    : null;
 }
 
 async function showTrail(hex) {
@@ -695,20 +717,21 @@ async function showTrail(hex) {
 
   // Static segments for history, split at long gaps; the last segment
   // becomes the live one and keeps growing while the plane is selected.
-  let seg = [];
+  let seg = [], alts = [];
   let prevTs = 0;
   for (const p of history) {
     const t = Date.parse(p.ts);
     if (seg.length && t - prevTs > TRAIL_GAP_MS) {
-      if (seg.length > 1) addTrailSegment(seg);
-      seg = [];
+      if (seg.length > 1) trailPrimitives.push(makeTrailPrimitive(seg, alts));
+      seg = []; alts = [];
     }
     seg.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat, (p.alt_ft || 0) * FT_TO_M));
+    alts.push(p.alt_ft || 0);
     prevTs = t;
   }
   trailPositions = seg;
-  const live = addTrailSegment([]);
-  live.polyline.positions = new Cesium.CallbackProperty(() => trailPositions, false);
+  trailAlts = alts;
+  rebuildLiveTrail();
 }
 
 function extendTrail(ac) {
@@ -716,6 +739,8 @@ function extendTrail(ac) {
   trailPositions.push(
     Cesium.Cartesian3.fromDegrees(ac.lon, ac.lat, flightAltitudeMeters(ac))
   );
+  trailAlts.push(typeof ac.alt_baro === "number" ? ac.alt_baro : 0);
+  rebuildLiveTrail();
 }
 
 // Icons are drawn in white and tinted per class via billboard.color.
