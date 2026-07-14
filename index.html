@@ -1937,7 +1937,7 @@ function flightMode(ac) {
     const landed = sinkAgo < 180000 ||
       (route && route.dest && typeof route.dest.lat === "number" &&
         gcKm(ac.lat, ac.lon, route.dest.lat, route.dest.lon) <= 55);
-    return landed ? ["Landing", "#ff8a65"] : ["Takeoff", "#a5ff7a"];
+    return landed ? ["Landing", "#ff8a65"] : ["Takeoff", "#ffe14d"];
   }
   const vr = typeof ac.baro_rate === "number" ? ac.baro_rate : null;
   // Seen on the runway moments ago and now airborne — and not arriving:
@@ -1947,13 +1947,13 @@ function flightMode(ac) {
       (vr === null || vr > -400) &&
       !(typeof ac.alt_baro === "number" && typeof rec.liftAlt === "number" &&
         ac.alt_baro - rec.liftAlt >= 1000))
-    return ["Takeoff", "#a5ff7a"];
+    return ["Takeoff", "#ffe14d"];
   if (vr === null) return ["—", ""];
   if (vr >= 400)
     // No ground history (first seen airborne): fall back to position —
     // right above the departure runway still counts as the takeoff phase.
     return inTerminalPhase(ac, route && route.dep, 1000, 15)
-      ? ["Takeoff", "#a5ff7a"] : ["Climbing", "#39ff8e"];
+      ? ["Takeoff", "#ffe14d"] : ["Climbing", "#39ff8e"];
   if (vr <= -400)
     return inTerminalPhase(ac, route && route.dest, 500, 55) // short final
       ? ["Landing", "#ff8a65"] : ["Descending", "#ffb84d"];
