@@ -174,7 +174,7 @@
   }
   /* ---------- Flight detail panel ---------- */
   .panel{
-    position:absolute;top:96px;left:20px;z-index:10;width:344px;
+    position:absolute;top:96px;left:16px;z-index:10;width:392px;
     background:var(--panel);border:1px solid var(--border);border-radius:14px;
     backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
     overflow:hidden;
@@ -210,20 +210,36 @@
   }
   .panel-photo a:hover{background:rgba(0,0,0,.75);}
   .ph-nav{
-    position:absolute;top:50%;transform:translateY(-50%);left:8px;
-    width:28px;height:28px;border-radius:50%;border:none;cursor:pointer;
+    position:absolute;top:50%;left:8px;
+    width:30px;height:30px;border-radius:50%;border:none;cursor:pointer;
     display:none;align-items:center;justify-content:center;
-    background:rgba(10,14,22,.55);color:#fff;font-size:17px;line-height:1;
-    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
-    transition:background .15s;padding-bottom:2px;
+    background:rgba(10,14,22,.5);color:#fff;font-size:18px;line-height:1;
+    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.12),0 2px 8px rgba(0,0,0,.4);
+    padding-bottom:2px;
+    /* Hidden until the photo is hovered; fade + slight slide in */
+    opacity:0;transform:translateY(-50%) scale(.85);pointer-events:none;
+    transition:opacity .2s ease,transform .2s cubic-bezier(.2,.8,.3,1.3),background .15s;
   }
   .ph-nav.next{left:auto;right:8px;}
-  .ph-nav:hover{background:rgba(10,14,22,.85);}
-  .ph-count{
-    position:absolute;left:8px;bottom:6px;display:none;
-    font-size:9px;letter-spacing:.08em;color:rgba(255,255,255,.9);
-    background:rgba(10,14,22,.55);border-radius:6px;padding:2px 7px;
-    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  .panel-photo.has-multi:hover .ph-nav{
+    opacity:1;transform:translateY(-50%) scale(1);pointer-events:auto;
+  }
+  .ph-nav:hover{background:rgba(10,14,22,.82);}
+  /* Premium progress dots — active one stretches into a gold pill */
+  .ph-dots{
+    position:absolute;left:0;right:0;bottom:9px;display:none;
+    justify-content:center;gap:5px;pointer-events:none;
+  }
+  .ph-dots i{
+    width:5px;height:5px;border-radius:99px;
+    background:rgba(255,255,255,.45);
+    box-shadow:0 1px 2px rgba(0,0,0,.5);
+    transition:width .28s cubic-bezier(.3,1.2,.4,1),background .2s;
+  }
+  .ph-dots i.on{
+    width:15px;background:var(--accent);
+    box-shadow:0 0 7px rgba(76,195,255,.7),0 1px 2px rgba(0,0,0,.5);
   }
   /* FR24-style departure → arrival strip under the aircraft photo */
   .panel-route{display:none;padding:13px 14px;border-bottom:1px solid var(--border);}
@@ -555,7 +571,7 @@
     <img id="fpPhoto" alt="Aircraft photo">
     <button class="ph-nav" id="fpPhotoPrev" aria-label="Previous photo">‹</button>
     <button class="ph-nav next" id="fpPhotoNext" aria-label="Next photo">›</button>
-    <span class="ph-count" id="fpPhotoCount"></span>
+    <div class="ph-dots" id="fpPhotoDots"></div>
     <a id="fpPhotoCredit" target="_blank" rel="noopener"></a>
   </div>
   <div class="panel-route" id="fpRoute"></div>
@@ -1707,7 +1723,7 @@ const fpPhoto = document.getElementById("fpPhoto");
 const fpPhotoCredit = document.getElementById("fpPhotoCredit");
 const fpPhotoPrev = document.getElementById("fpPhotoPrev");
 const fpPhotoNext = document.getElementById("fpPhotoNext");
-const fpPhotoCount = document.getElementById("fpPhotoCount");
+const fpPhotoDots = document.getElementById("fpPhotoDots");
 const photoCache = new Map(); // hex -> [{src, credit, link}]
 let photoHex = null, photoList = [], photoIdx = 0;
 function renderPanelPhoto() {
@@ -1717,9 +1733,13 @@ function renderPanelPhoto() {
   fpPhotoCredit.textContent = p.credit;
   fpPhotoCredit.href = p.link;
   const multi = photoList.length > 1;
-  fpPhotoCount.textContent = `${photoIdx + 1} / ${photoList.length}`;
+  fpPhotoWrap.classList.toggle("has-multi", multi);
   fpPhotoPrev.style.display = fpPhotoNext.style.display = multi ? "flex" : "none";
-  fpPhotoCount.style.display = multi ? "block" : "none";
+  if (fpPhotoDots.childElementCount !== photoList.length) {
+    fpPhotoDots.innerHTML = photoList.map(() => "<i></i>").join("");
+  }
+  [...fpPhotoDots.children].forEach((d, i) => d.classList.toggle("on", i === photoIdx));
+  fpPhotoDots.style.display = multi ? "flex" : "none";
   fpPhotoWrap.style.display = "block";
 }
 async function updateAircraftPhoto(ac) {
