@@ -268,6 +268,15 @@
     letter-spacing:.04em;
   }
   .rp-eta b{color:var(--text);font-weight:650;font-variant-numeric:tabular-nums;}
+  /* Departure/arrival clock times in each airport's local timezone */
+  .rp-times{display:flex;justify-content:space-between;margin-top:11px;gap:12px;}
+  .rp-times>div{min-width:0;}
+  .rp-times>div:last-child{text-align:right;}
+  .rp-times span{display:block;font-size:9px;letter-spacing:.18em;color:var(--muted);}
+  .rp-times b{display:block;font-size:14.5px;font-weight:650;margin-top:2px;
+    font-variant-numeric:tabular-nums;}
+  .rp-times small{display:block;font-size:9px;color:var(--muted);margin-top:1px;
+    letter-spacing:.03em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   /* Flight mode: coloured status with a softly pulsing glow dot */
   #fpMode{display:flex;align-items:center;gap:7px;font-size:15px;}
   .mode-dot{
@@ -936,6 +945,36 @@ function clearRouteDisplay() {
 /* Live progress along the route: distance covered/remaining from the
  * great-circle legs, arrival estimated from ground speed. Refreshed each
  * second by the panel updater so the bar and countdown move in real time. */
+/* Airport local timezones via Open-Meteo (free, keyless, CORS-open):
+ * coordinates -> IANA zone + current UTC offset, cached per location.
+ * Times then format DST-correctly through Intl. */
+const tzCache = new Map();
+async function getTz(lat, lon) {
+  const key = lat.toFixed(1) + "," + lon.toFixed(1);
+  if (tzCache.has(key)) return tzCache.get(key);
+  let tz = null;
+  try {
+    const j = await (await fetch("https://api.open-meteo.com/v1/forecast" +
+      `?latitude=${lat}&longitude=${lon}&timezone=auto&forecast_days=1`)).json();
+    if (j.timezone) tz = { zone: j.timezone, off: j.utc_offset_seconds || 0 };
+  } catch (e) { /* offline: fall back to viewer-local times */ }
+  tzCache.set(key, tz);
+  return tz;
+}
+function fmtInZone(date, tz) {
+  try {
+    return date.toLocaleTimeString("en-US",
+      { hour: "numeric", minute: "2-digit", timeZone: tz?.zone });
+  } catch (e) {
+    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+}
+function tzLabel(tz) {
+  if (!tz) return "your time";
+  const h = tz.off / 3600;
+  return `local · UTC${h >= 0 ? "+" : ""}${Number.isInteger(h) ? h : h.toFixed(1)}`;
+}
+
 function gcKm(lat1, lon1, lat2, lon2) {
   const r = Math.PI / 180, R = 6371;
   const a = Math.sin((lat2 - lat1) * r / 2) ** 2 +
@@ -956,17 +995,28 @@ function updateRouteProgress(ac) {
   document.getElementById("rpLeft").textContent = Math.round(left).toLocaleString() + " km";
   const eta = document.getElementById("rpEta");
   const gs = typeof ac.gs === "number" ? ac.gs : 0;
+  const depT = document.getElementById("rpDepT");
   if (gs > 80 && left > 5) {
     const mins = Math.round(left / (gs * 1.852) * 60);
     const h = Math.floor(mins / 60), m = mins % 60;
-    const when = new Date(Date.now() + mins * 60000)
-      .toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    eta.innerHTML = `Landing in <b>${h ? h + " h " : ""}${m} min</b> · ` +
-      `arrival <b>≈ ${when}</b> <span style="opacity:.65">(estimated)</span>`;
+    eta.innerHTML = `Landing in <b>${h ? h + " h " : ""}${m} min</b> ` +
+      '<span style="opacity:.65">(estimated)</span>';
+    // Clock times in each airport's local timezone. Departure is derived
+    // from distance covered at a cruise-ish speed, so it's approximate.
+    const arrDate = new Date(Date.now() + mins * 60000);
+    const depDate = new Date(Date.now() - covered / (Math.max(gs, 300) * 1.852) * 3600000);
+    depT.textContent = "≈ " + fmtInZone(depDate, routeEnds.depTz);
+    document.getElementById("rpDepTz").textContent = tzLabel(routeEnds.depTz);
+    document.getElementById("rpArrT").textContent = "≈ " + fmtInZone(arrDate, routeEnds.destTz);
+    document.getElementById("rpArrTz").textContent = tzLabel(routeEnds.destTz);
   } else if (left <= 5) {
     eta.innerHTML = "<b>Arriving</b>";
   } else {
     eta.textContent = "";
+    if (depT) {
+      depT.textContent = "—";
+      document.getElementById("rpArrT").textContent = "—";
+    }
   }
 }
 
@@ -1037,6 +1087,10 @@ async function showRoute(hex) {
           '<svg class="rp-plane" id="rpPlane" width="15" height="15" viewBox="0 0 24 24" fill="#eaf3ff">' +
           '<path transform="rotate(90 12 12)" d="M21.5 15.5v-2l-8.5-5V3.25a1.25 1.25 0 1 0-2.5 0V8.5l-8.5 5v2l8.5-2.5v5.2l-2.3 1.55v1.5L12 20l3.8 1.25v-1.5L13.5 18.2V13l8 2.5Z"/></svg>' +
         "</div>" +
+        '<div class="rp-times">' +
+          '<div><span>DEPARTED</span><b id="rpDepT">—</b><small id="rpDepTz"></small></div>' +
+          '<div><span>ARRIVAL</span><b id="rpArrT">—</b><small id="rpArrTz"></small></div>' +
+        "</div>" +
         '<div class="rp-eta" id="rpEta"></div>' +
       "</div>" : "") +
     (route.plausible ? "" : '<div class="route-note">Route on file may not match this flight</div>');
@@ -1044,6 +1098,14 @@ async function showRoute(hex) {
   if (canProgress) {
     routeEnds = { dep, dest };
     updateRouteProgress(f.data);
+    // Resolve each airport's local timezone, then re-render the clock row
+    Promise.all([getTz(dep.lat, dep.lon), getTz(dest.lat, dest.lon)]).then(([dtz, atz]) => {
+      if (routeHex !== hex || !routeEnds) return; // selection changed
+      routeEnds.depTz = dtz;
+      routeEnds.destTz = atz;
+      const cur = flights.get(hex);
+      if (cur) updateRouteProgress(cur.data);
+    });
   }
   addRouteVisuals(hex, dep, dest);
 }
