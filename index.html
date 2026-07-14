@@ -1961,6 +1961,12 @@ function flightMode(ac) {
   // the baro can lag the runway by a few seconds. Still landing.
   if (sinkAgo < 90000 && inTerminalPhase(ac, route && route.dest, 500, 55))
     return ["Landing", "#ff8a65"];
+  // Some transponders never send the on-ground flag and report a numeric
+  // altitude while taxiing: level at ground height is On Ground — or the
+  // takeoff roll once it's moving fast.
+  if (inTerminalPhase(ac, route && route.dep, 250, 15))
+    return (typeof ac.gs === "number" && ac.gs > 40)
+      ? ["Takeoff", "#ffe14d"] : ["On Ground", "#c792ff"];
   return ["Cruising", "#4cc3ff"];
 }
 
