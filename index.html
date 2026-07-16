@@ -1388,6 +1388,12 @@ async function showRoute(hex) {
  * Loaded lazily so the 0.9 MB file never costs a first paint. */
 const RUNWAY_SHOW_ALT = 60000;   // metres: below this, runways are drawn
 const RUNWAY_LIFT_M = 30;        // metres above the surface, to avoid z-fighting
+// Real runway identifiers start with a magnetic heading, 01-36. Water
+// runways at seaplane bases ("N"/"S", "NE"/"SW", even "ALL"/"WAY") and
+// heliport strips ("H09L") don't, and shouldn't be drawn as runways.
+const RUNWAY_IDENT_RE = /^(0?[1-9]|[12][0-9]|3[0-6])/;
+const isRealRunway = (le, he) =>
+  (le && RUNWAY_IDENT_RE.test(le)) || (he && RUNWAY_IDENT_RE.test(he));
 let runwayDb = null, runwayLoading = null;
 let runwayEntities = [], runwayKey = "";
 
@@ -1423,6 +1429,7 @@ async function updateRunways() {
   runwayEntities = [];
   for (const [ident, rwys] of Object.entries(db)) {
     for (const [le, he, laLat, laLon, hbLat, hbLon, lenFt] of rwys) {
+      if (!isRealRunway(le, he)) continue; // skip water runways / helipads
       if (gcKm(lat, lon, laLat, laLon) > 40) continue; // only what's in view
       // Lifted a few metres: geometry sitting exactly on the ellipsoid
       // z-fights with the globe surface and disappears. No terrain is
