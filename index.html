@@ -1388,6 +1388,12 @@ async function showRoute(hex) {
  * Loaded lazily so the 0.9 MB file never costs a first paint. */
 const RUNWAY_SHOW_ALT = 60000;   // metres: below this, runways are drawn
 const RUNWAY_LIFT_M = 30;        // metres above the surface, to avoid z-fighting
+// Real runway identifiers start with a magnetic heading, 01-36. Water
+// runways at seaplane bases ("N"/"S", "NE"/"SW", even "ALL"/"WAY") and
+// heliport strips ("H09L") don't, and shouldn't be drawn as runways.
+const RUNWAY_IDENT_RE = /^(0?[1-9]|[12][0-9]|3[0-6])/;
+const isRealRunway = (le, he) =>
+  (le && RUNWAY_IDENT_RE.test(le)) || (he && RUNWAY_IDENT_RE.test(he));
 let runwayDb = null, runwayLoading = null;
 let runwayEntities = [], runwayKey = "";
 
@@ -1422,8 +1428,12 @@ async function updateRunways() {
   runwayEntities.forEach((e) => viewer.entities.remove(e));
   runwayEntities = [];
   for (const [ident, rwys] of Object.entries(db)) {
+    // Airport centre = mean of its runway thresholds, for the pin below
+    let cLat = 0, cLon = 0, ends = 0;
     for (const [le, he, laLat, laLon, hbLat, hbLon, lenFt] of rwys) {
+      if (!isRealRunway(le, he)) continue; // skip water runways / helipads
       if (gcKm(lat, lon, laLat, laLon) > 40) continue; // only what's in view
+      cLat += laLat + hbLat; cLon += laLon + hbLon; ends += 2;
       // Lifted a few metres: geometry sitting exactly on the ellipsoid
       // z-fights with the globe surface and disappears. No terrain is
       // configured, so a small constant offset is all that's needed.
@@ -1453,19 +1463,56 @@ async function updateRunways() {
         }));
       }
     }
+    // The map tiles' own airport glyph goes grey under the imagery tint;
+    // overlay the same vibrant pin used for route markers at every airport.
+    if (ends) {
+      runwayEntities.push(viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(cLon / ends, cLat / ends, RUNWAY_LIFT_M),
+        billboard: {
+          image: AIRPORT_PIN,
+          width: 24, height: 32,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, RUNWAY_SHOW_ALT)
+        }
+      }));
+    }
   }
 }
+
+// One shared map-pin icon for every airport marker on the globe: a bright
+// blue teardrop with a white rim and punched-out hole, drawn at 2x for
+// crisp edges. A single data URL keeps it to one texture-atlas entry.
+const AIRPORT_PIN = (() => {
+  const c = document.createElement("canvas");
+  c.width = 48; c.height = 64;
+  const x = c.getContext("2d");
+  x.scale(2, 2);
+  // Teardrop: round head, tapering to a point at the bottom centre
+  const pin = new Path2D(
+    "M12 1 C6 1 1.5 5.5 1.5 11.5 C1.5 16 5 20.5 12 31 C19 20.5 22.5 16 22.5 11.5 C22.5 5.5 18 1 12 1 Z"
+  );
+  x.fillStyle = "#4cc3ff";
+  x.fill(pin);
+  x.strokeStyle = "#eaf3ff";           // same bright white as the runway lines
+  x.lineWidth = 2;
+  x.stroke(pin);
+  x.globalCompositeOperation = "destination-out"; // punch the hole
+  x.beginPath();
+  x.arc(12, 11.5, 4.5, 0, Math.PI * 2);
+  x.fill();
+  return c.toDataURL();
+})();
 
 function addRouteVisuals(hex, dep, dest) {
   for (const ap of [dep, dest]) {
     if (typeof ap.lat !== "number" || typeof ap.lon !== "number") continue;
     routeMarkers.push(viewer.entities.add({
       position: Cesium.Cartesian3.fromDegrees(ap.lon, ap.lat),
-      point: {
-        pixelSize: 7,
-        color: Cesium.Color.fromCssColorString("#4cc3ff"),
-        outlineColor: Cesium.Color.WHITE,
-        outlineWidth: 1.5,
+      billboard: {
+        image: AIRPORT_PIN,
+        width: 24, height: 32,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM, // tip on the airport
         disableDepthTestDistance: Number.POSITIVE_INFINITY
       },
       label: {
@@ -1475,7 +1522,7 @@ function addRouteVisuals(hex, dep, dest) {
         showBackground: true,
         backgroundColor: new Cesium.Color(0.05, 0.07, 0.12, 0.8),
         backgroundPadding: new Cesium.Cartesian2(6, 4),
-        pixelOffset: new Cesium.Cartesian2(0, -14),
+        pixelOffset: new Cesium.Cartesian2(0, -36), // clear the pin's head
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         disableDepthTestDistance: Number.POSITIVE_INFINITY
       }
@@ -2255,11 +2302,20 @@ function selectFlight(hex) {
   if (routeHex !== hex) showRoute(hex);
 }
 
+/* scene.pick returns only the topmost object, so a plane sitting under a
+ * runway centreline (or any other overlay) is unreachable. Drill through
+ * the first few hits and prefer a plane. */
+function pickPlaneId(pos) {
+  for (const p of scene.drillPick(pos, 5)) {
+    if (p && typeof p.id === "string" && p.id.startsWith("plane:")) return p.id;
+  }
+  return null;
+}
+
 const pickHandler = new Cesium.ScreenSpaceEventHandler(scene.canvas);
 pickHandler.setInputAction((evt) => {
-  const picked = scene.pick(evt.position);
-  const id = picked && typeof picked.id === "string" ? picked.id : null;
-  if (id && id.startsWith("plane:")) {
+  const id = pickPlaneId(evt.position);
+  if (id) {
     selectFlight(id.slice(6));
   } else {
     closeFlightPanel();
@@ -2273,9 +2329,8 @@ const planeTipCs = document.getElementById("planeTipCs");
 planeTipLogo.addEventListener("error", () => { planeTipLogo.style.display = "none"; });
 let tipHex = null;
 pickHandler.setInputAction((evt) => {
-  const picked = scene.pick(evt.endPosition);
-  const id = picked && typeof picked.id === "string" ? picked.id : null;
-  if (id && id.startsWith("plane:")) {
+  const id = pickPlaneId(evt.endPosition);
+  if (id) {
     const hex = id.slice(6);
     const f = flights.get(hex);
     if (f) {
