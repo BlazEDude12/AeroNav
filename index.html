@@ -1027,12 +1027,15 @@ const ROUTE_ENDPOINTS = [
 const routeCache = new Map(); // callsign -> {airports, plausible} | null
 let routeHex = null;          // aircraft whose route is displayed
 let routeMarkers = [];        // departure/destination airport entities
+let routePinCoords = [];      // their {lat, lon}, so runway pins can dedupe
 let destLine = null;          // dashed great circle: aircraft -> destination
 let routeEnds = null;         // {dep, dest} of the displayed route, for progress
 
 function clearRouteDisplay() {
   routeMarkers.forEach((e) => viewer.entities.remove(e));
   routeMarkers = [];
+  routePinCoords = [];
+  refreshRunwayPins();
   if (destLine) { viewer.entities.remove(destLine); destLine = null; }
   fpRoute.style.display = "none";
   fpRoute.innerHTML = "";
@@ -1414,6 +1417,13 @@ function clearRunways() {
   runwayKey = "";
 }
 
+// Route markers reuse the same pin, so redraw the runway overlay whenever a
+// route appears or clears — its per-airport pin yields to the route marker.
+function refreshRunwayPins() {
+  runwayKey = "";
+  updateRunways();
+}
+
 async function updateRunways() {
   const cam = viewer.camera.positionCartographic;
   if (cam.height > RUNWAY_SHOW_ALT) { if (runwayEntities.length) clearRunways(); return; }
@@ -1464,13 +1474,29 @@ async function updateRunways() {
       }
     }
     // The map tiles' own airport glyph goes grey under the imagery tint;
-    // overlay the same vibrant pin used for route markers at every airport.
-    if (ends) {
+    // overlay the same vibrant pin used for route markers at every airport,
+    // labelled like them too (IATA when known, otherwise the db ident).
+    // If a route marker already pins this airport, it takes precedence —
+    // adding ours too would show two pins a few hundred metres apart.
+    const pinLat = cLat / ends, pinLon = cLon / ends;
+    if (ends && !routePinCoords.some((p) => gcKm(p.lat, p.lon, pinLat, pinLon) < 5)) {
       runwayEntities.push(viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(cLon / ends, cLat / ends, RUNWAY_LIFT_M),
+        position: Cesium.Cartesian3.fromDegrees(pinLon, pinLat, RUNWAY_LIFT_M),
         billboard: {
           image: AIRPORT_PIN,
           width: 24, height: 32,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, RUNWAY_SHOW_ALT)
+        },
+        label: {
+          text: iataFor(ident),
+          font: "600 11px system-ui",
+          fillColor: Cesium.Color.WHITE,
+          showBackground: true,
+          backgroundColor: new Cesium.Color(0.05, 0.07, 0.12, 0.8),
+          backgroundPadding: new Cesium.Cartesian2(6, 4),
+          pixelOffset: new Cesium.Cartesian2(0, -36), // clear the pin's head
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, RUNWAY_SHOW_ALT)
@@ -1478,6 +1504,15 @@ async function updateRunways() {
       }));
     }
   }
+}
+
+// IATA code for a runway-db ident (ICAO or US local code), from the search
+// db's major-hub list; small fields without an entry keep their ident.
+// Built lazily: AIRPORTS is declared further down the script.
+let icaoToIata = null;
+function iataFor(ident) {
+  if (!icaoToIata) icaoToIata = new Map(AIRPORTS.map((a) => [a[1], a[0]]));
+  return icaoToIata.get(ident) || ident;
 }
 
 // One shared map-pin icon for every airport marker on the globe: a bright
@@ -1507,6 +1542,7 @@ const AIRPORT_PIN = (() => {
 function addRouteVisuals(hex, dep, dest) {
   for (const ap of [dep, dest]) {
     if (typeof ap.lat !== "number" || typeof ap.lon !== "number") continue;
+    routePinCoords.push({ lat: ap.lat, lon: ap.lon });
     routeMarkers.push(viewer.entities.add({
       position: Cesium.Cartesian3.fromDegrees(ap.lon, ap.lat),
       billboard: {
@@ -1528,6 +1564,7 @@ function addRouteVisuals(hex, dep, dest) {
       }
     }));
   }
+  refreshRunwayPins();
   if (typeof dest.lat !== "number" || typeof dest.lon !== "number") return;
   const destPos = Cesium.Cartesian3.fromDegrees(dest.lon, dest.lat);
   destLine = viewer.entities.add({
