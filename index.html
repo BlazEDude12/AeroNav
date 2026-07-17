@@ -2281,6 +2281,17 @@ function flightMode(ac) {
   // the baro can lag the runway by a few seconds. Still landing.
   if (sinkAgo < 90000 && inTerminalPhase(ac, route && route.dest, 500, 55))
     return ["Landing", "#ff8a65"];
+  // Level segment on approach: aircraft step down in stages, holding
+  // altitude between descents (e.g. level at 3,000 ft intercepting the
+  // glideslope). Low over the destination — or level right after a
+  // sustained descent while still well below cruise — is still the
+  // descent phase, not cruising.
+  if (!inTerminalPhase(ac, route && route.dest, 250, 70) && // not on the ground
+      inTerminalPhase(ac, route && route.dest, 8000, 70) &&
+      (sinkAgo < 300000 ||
+        (route && route.dest && typeof route.dest.lat === "number" &&
+          gcKm(ac.lat, ac.lon, route.dest.lat, route.dest.lon) <= 70)))
+    return ["Descending", "#ffb84d"];
   // Some transponders never send the on-ground flag and report a numeric
   // altitude while taxiing: level at ground height is On Ground — or the
   // takeoff roll once it's moving fast.
