@@ -533,6 +533,13 @@
   }
   body.perf .glass--liquid::after{filter:none;}
   body.perf{--glass-blur:6px;--glass-sat:110%;}
+  /* FEATURES.glassSystem = false. .glass now supplies every surface's
+     background, so "off" can't mean "no rule" — it means a flat opaque HUD. */
+  body.no-glass .glass{
+    backdrop-filter:none;-webkit-backdrop-filter:none;
+    background:rgba(var(--glass-scrim),.94);
+  }
+  body.no-glass .glass--liquid::after{display:none;}
   @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))){
     :root{--glass-scrim-alpha:.94;}
     .glass--liquid::after{filter:none;}
@@ -751,6 +758,93 @@
 
 <script>
 "use strict";
+
+/* ================= FEATURE FLAGS =================
+ * Every added feature checks its flag, so any one can be switched off here
+ * without touching the others. Flipping one to false must leave the app
+ * fully working — never just visually broken.
+ * ================================================= */
+const FEATURES = {
+  glassSystem:     true,  // #1  liquid-glass HUD material
+  altitudeRibbon:  true,  // #2  altitude wall behind the selected flight
+  timelineScrubber:true,  // #3  replay the last hour of the selected flight
+  weatherAmbient:  true,  // #4  arrival-METAR fog / wind rose / category tint
+  myFlightsShelf:  true,  // #5  favourites as glass cards
+  commandPalette:  true,  // #6  Cmd/Ctrl+K search overlay
+  flipBoard:       true,  // #7  airport split-flap board
+  detailSheet:     true,  // #8  expanded aircraft sheet
+  densityLayer:    true,  // #9  live congestion overlay
+  adaptiveGlass:   true   // #10 settings panel, auto tint, perf mode
+};
+
+/* ---------------- Fail-soft plumbing ----------------
+ * A feature that throws must take only itself down. Anything that throws is
+ * disabled for the session (so a per-second updater can't spam the console),
+ * its UI is torn down, and the globe keeps flying. */
+const featureDisabled = new Set();
+const featureTeardown = new Map();  // name -> hide this feature's UI
+
+function featureOn(name) {
+  return !!FEATURES[name] && !featureDisabled.has(name);
+}
+// How to hide a feature's UI if it ever throws.
+function onFeatureFail(name, teardown) { featureTeardown.set(name, teardown); }
+
+function disableFeature(name, err) {
+  if (featureDisabled.has(name)) return;
+  featureDisabled.add(name);
+  console.warn(`[AeroNav3D:${name}]`, (err && err.stack) || err);
+  const hide = featureTeardown.get(name);
+  if (hide) { try { hide(); } catch (e) { /* teardown failed; nothing left to do */ } }
+}
+
+// Run fn behind its flag; swallow and disable on throw. Returns undefined
+// when the feature is off, so callers must treat that as "not available".
+function safe(name, fn) {
+  if (!featureOn(name)) return;
+  try { return fn(); } catch (err) { disableFeature(name, err); }
+}
+async function safeAsync(name, fn) {
+  if (!featureOn(name)) return;
+  try { return await fn(); } catch (err) { disableFeature(name, err); }
+}
+
+/* ---------------- Adaptive glass + perf mode (Feature #10) ----------------
+ * Session-scoped by design: settings live in memory only, so a reload is
+ * always a clean slate. */
+const GLASS_DEFAULTS = { blur: 20, sat: 145, alpha: 0.10, scrimAlpha: 0.78, tint: "255,255,255" };
+const glassSettings = { ...GLASS_DEFAULTS };
+let perfMode = false;
+
+const reduceMotionMQ = window.matchMedia("(prefers-reduced-motion: reduce)");
+const prefersReducedMotion = () => reduceMotionMQ.matches;
+
+// Features that need to react to perf mode / reduced motion register here.
+const perfHooks = [];
+function onPerfModeChange(fn) { perfHooks.push(fn); }
+function perfModeOn() { return perfMode; }
+
+function applyGlassSettings() {
+  const r = document.documentElement.style;
+  r.setProperty("--glass-blur", glassSettings.blur + "px");
+  r.setProperty("--glass-sat", glassSettings.sat + "%");
+  r.setProperty("--glass-alpha", String(glassSettings.alpha));
+  r.setProperty("--glass-scrim-alpha", String(glassSettings.scrimAlpha));
+  r.setProperty("--glass-tint", glassSettings.tint);
+}
+
+/* body.perf hard-overrides the blur vars from CSS (a class on body beats an
+ * inherited value set on :root), and every hook backs its own cost off. */
+function setPerfMode(on) {
+  perfMode = !!on;
+  document.body.classList.toggle("perf", perfMode);
+  perfHooks.forEach((fn) => { try { fn(perfMode); } catch (e) { console.warn("[AeroNav3D:perfMode]", e); } });
+}
+
+if (!FEATURES.glassSystem) document.body.classList.add("no-glass");
+reduceMotionMQ.addEventListener("change", () => {
+  perfHooks.forEach((fn) => { try { fn(perfMode); } catch (e) { /* hook is best-effort */ } });
+});
 
 /* ================= CONFIGURATION =================
  * Google Maps Platform API key with the "Map Tiles API" enabled:
