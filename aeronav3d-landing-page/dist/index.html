@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="AeroNav is a live agentic AI flight-tracking app with a 3D globe, private memory, and a voice copilot for aviation lovers.">
+    <title>AeroNav | Your sky, remembered</title>
+    <link rel="icon" href="assets/aeronav3d-logo-orb.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Oswald:wght@500;600;700&amp;display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=20260717-mobile">
+    <script src="main.js?v=20260717-mobile" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="background-field" aria-hidden="true"></div>
+
+    <header class="site-nav" data-nav>
+      <a class="brand" href="#hero" aria-label="AeroNav home">
+        <img src="assets/aeronav3d-logo-orb.svg" alt="" width="44" height="44">
+        <span>AeroNav</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a href="#copilot">Copilot</a>
+        <a href="#memory">Memory</a>
+        <a href="#layers">Live layers</a>
+        <a href="#roadmap">Roadmap</a>
+      </nav>
+      <a class="nav-cta" href="https://www.instagram.com/aeronav3d/" target="_blank" rel="noreferrer">Get updates</a>
+      <span class="nav-collapse-glyph" aria-hidden="true">
+        <span></span>
+        <span></span>
+        <span></span>
+      </span>
+    </header>
+
+    <main id="main">
+      <section id="hero" class="cinematic-hero" data-cinematic-hero aria-labelledby="hero-heading">
+        <div class="film-grain" aria-hidden="true"></div>
+        <div class="bg-grid-theme" aria-hidden="true"></div>
+        <div class="bg-pattern bg-pattern-dots" aria-hidden="true"></div>
+
+        <div class="cinema-stage">
+          <div class="hero-text-wrapper">
+            <p class="eyebrow">Agentic AI flight tracking</p>
+            <h1 id="hero-heading" class="cinematic-title">
+              <span class="text-track">Track the sky,</span>
+              <span class="text-days">remember yours.</span>
+            </h1>
+          </div>
+
+          <div class="cta-wrapper">
+            <p class="eyebrow">AeroNav</p>
+            <h2>Start with the flight you mean.</h2>
+            <p>
+              Ask the copilot for a route, a friend&apos;s flight, a delay check, or the aircraft overhead. AeroNav verifies live data before it answers.
+            </p>
+            <div class="hero-actions">
+              <a class="button primary" href="#copilot">View the copilot</a>
+              <a class="button secondary" href="#memory">See your sky log</a>
+            </div>
+          </div>
+
+          <div class="main-card premium-depth-card" data-cinema-card>
+            <div class="card-sheen" aria-hidden="true"></div>
+
+            <div class="cinema-card-grid">
+              <div class="card-left-text">
+                <p class="eyebrow">Private memory layer</p>
+                <h2>Account for your sky.</h2>
+                <p>
+                  AeroNav keeps a private logbook of every aircraft you inspect: routes, altitude records, favorite airlines, rare moments, streaks, and the miles you earn by coming back.
+                </p>
+              </div>
+
+              <div class="mockup-scroll-wrapper">
+                <div class="phone-shell" data-phone-mockup>
+                  <span class="hardware-btn hardware-left" aria-hidden="true"></span>
+                  <span class="hardware-btn hardware-right" aria-hidden="true"></span>
+                  <div class="phone-screen">
+                    <div class="screen-glare" aria-hidden="true"></div>
+                    <div class="dynamic-island" aria-hidden="true"><span></span></div>
+                    <div class="phone-topline">
+                      <span>Live globe</span>
+                      <strong>EK229</strong>
+                    </div>
+                    <div class="phone-globe" aria-label="Interactive spinning 3D flight globe">
+                      <canvas id="globeCanvas" role="img" aria-label="A spinning 3D globe with live routes and a highlighted Dubai to Seattle flight."></canvas>
+                    </div>
+                    <div class="phone-widget route-widget">
+                      <span>Dubai</span>
+                      <div class="progress-rail"><i></i></div>
+                      <span>Seattle</span>
+                    </div>
+                    <div class="phone-widget copilot-widget">
+                      <span class="message-label">Copilot prompt</span>
+                      <p>&quot;Track my friend&apos;s flight from Dubai to Seattle on Emirates.&quot;</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="floating-badge badge-left">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 3l2.3 5.5 5.9.5-4.5 3.8 1.4 5.8L12 15.5 6.9 18.6l1.4-5.8L3.8 9l5.9-.5L12 3z"/>
+                  </svg>
+                  <div>
+                    <strong>Captain&apos;s Club</strong>
+                    <span>Rank unlocked</span>
+                  </div>
+                </div>
+
+                <div class="floating-badge badge-right">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 12.5l4.2 4.2L19.5 6.4"/>
+                  </svg>
+                  <div>
+                    <strong>Flight verified</strong>
+                    <span>No guessing</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card-right-text">
+                <h2>AeroNav</h2>
+                <p>Live aircraft. 3D globe. Agentic copilot.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="copilot" class="slide copilot-section" data-plane="1">
+        <div class="section-fog" aria-hidden="true"></div>
+        <div class="split-layout">
+          <div class="section-copy" data-reveal>
+            <p class="eyebrow">The magic moment</p>
+            <h2>Just say the flight you mean.</h2>
+            <p>
+              A friend texts, "Just boarded in Dubai, see you tonight in Seattle." You do not need the flight number. AeroNav checks live schedules, aircraft positions, route timing, and airline data until it can prove the match.
+            </p>
+            <p>
+              If it knows, the map glides to the real aircraft and follows it. If it does not know, it says so.
+            </p>
+          </div>
+
+          <div class="copilot-console glass-panel" data-reveal>
+            <div class="console-topline">
+              <span>Copilot check</span>
+              <strong>Verified live</strong>
+            </div>
+            <div class="dialogue">
+              <div class="bubble user">Track my friend's flight from Dubai to Seattle on Emirates.</div>
+              <div class="bubble ai">I found the active Emirates Dubai to Seattle flight and confirmed the aircraft against live position data.</div>
+              <div class="bubble ai compact">Following EK229 now. Estimated landing: 9h 42m.</div>
+            </div>
+            <div class="flight-progress" aria-label="Flight progress from Dubai to Seattle">
+              <span>Dubai</span>
+              <div class="progress-rail"><i></i></div>
+              <span>Seattle</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="memory" class="slide memory-section" data-plane="2">
+        <div class="section-fog" aria-hidden="true"></div>
+        <div class="section-header" data-reveal>
+          <p class="eyebrow">The difference</p>
+          <h2>Your personal sky builds itself.</h2>
+          <p>
+            FlightRadar24 shows what is happening now. AeroNav adds memory: every plane you inspect becomes part of your private logbook, with lifetime stats, streaks, ranks, and rare moments worth keeping.
+          </p>
+        </div>
+
+        <div class="asymmetric-grid">
+          <article class="memory-card tall glass-panel" data-reveal>
+            <span class="card-index">01</span>
+            <h3>Lifetime logbook</h3>
+            <p>Remember every aircraft you have ever opened, from late-night long-hauls to the tiny regional jet overhead.</p>
+            <strong>12,480 miles earned</strong>
+          </article>
+          <article class="memory-card wide glass-panel" data-reveal>
+            <span class="card-index">02</span>
+            <h3>Ranks and streaks</h3>
+            <p>Open the app daily to earn miles and climb from Economy to Captain&apos;s Club.</p>
+          </article>
+          <article class="memory-card wide glass-panel" data-reveal>
+            <span class="card-index">03</span>
+            <h3>Highest plane spotted</h3>
+            <p>A running record of the highest aircraft you have tracked, the airline, the route, and where you were when you found it.</p>
+            <strong>43,000 ft</strong>
+          </article>
+          <article class="memory-card glass-panel" data-reveal>
+            <span class="card-index">04</span>
+            <h3>Airlines you see most</h3>
+            <p>Your most-seen carriers become a tiny fingerprint of your local sky.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="layers" class="slide layers-section" data-plane="3">
+        <div class="section-fog" aria-hidden="true"></div>
+        <div class="section-header narrow" data-reveal>
+          <p class="eyebrow">Live tracking stack</p>
+          <h2>Everything expected. One thing no tracker has.</h2>
+        </div>
+        <div class="feature-matrix">
+          <div class="feature-cell glass-panel" data-reveal>
+            <span>Route</span>
+            <h3>Tap any aircraft</h3>
+            <p>Route, altitude, speed, aircraft type, and time remaining to destination.</p>
+          </div>
+          <div class="feature-cell glass-panel" data-reveal>
+            <span>Weather</span>
+            <h3>Sky layers</h3>
+            <p>Weather overlays help explain holds, diversions, and airport delays.</p>
+          </div>
+          <div class="feature-cell glass-panel" data-reveal>
+            <span>Alerts</span>
+            <h3>Emergency signal</h3>
+            <p>Instant alerts when an aircraft declares an emergency or a tracked flight changes status.</p>
+          </div>
+          <div class="feature-cell glass-panel" data-reveal>
+            <span>Search</span>
+            <h3>Smart narrowing</h3>
+            <p>Type a flight, airport, airline, city, or natural-language intent and AeroNav tightens the result set.</p>
+          </div>
+          <div class="feature-cell glass-panel standout" data-reveal>
+            <span>Memory</span>
+            <h3>The personal layer</h3>
+            <p>Flight history, highest spots, favorite airlines, streaks, badges, and private stats that belong to you.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide compare-section" data-plane="4">
+        <div class="section-fog" aria-hidden="true"></div>
+        <div class="compare-copy" data-reveal>
+          <p class="eyebrow">Positioning</p>
+          <h2>
+            <span>Built for people who look up</span>
+            <span>every time a plane flies over.</span>
+          </h2>
+          <p>
+            The market already knows live flight maps. AeroNav earns attention by turning the sky into a personal, conversational, collectible place.
+          </p>
+        </div>
+        <div class="comparison-table glass-panel" data-reveal>
+          <div class="row head">
+            <span>Experience</span>
+            <span>FlightRadar24</span>
+            <span>AeroNav</span>
+          </div>
+          <div class="row">
+            <span>Live aircraft map</span>
+            <span class="competitor-cell" data-label="FlightRadar24">Strong</span>
+            <span class="aeronav-cell" data-label="AeroNav">Strong, with 3D globe focus</span>
+          </div>
+          <div class="row">
+            <span>Voice-first tracking</span>
+            <span class="competitor-cell" data-label="FlightRadar24">Search driven</span>
+            <span class="aeronav-cell" data-label="AeroNav">Natural AI copilot</span>
+          </div>
+          <div class="row">
+            <span>Personal history</span>
+            <span class="competitor-cell" data-label="FlightRadar24">Limited</span>
+            <span class="aeronav-cell" data-label="AeroNav">Private memory and logbook</span>
+          </div>
+          <div class="row">
+            <span>Delight loop</span>
+            <span class="competitor-cell" data-label="FlightRadar24">Observation</span>
+            <span class="aeronav-cell" data-label="AeroNav">Miles, ranks, badges, rare aircraft moments</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="roadmap" class="slide roadmap-section" data-plane="5">
+        <div class="section-fog" aria-hidden="true"></div>
+        <div class="section-header" data-reveal>
+          <p class="eyebrow">Where it goes next</p>
+          <h2>A flight tracker that starts talking before you ask.</h2>
+        </div>
+        <div class="timeline">
+          <article data-reveal>
+            <span>Next</span>
+            <h3>Collectible badges</h3>
+            <p>Spot a one-of-a-kind cargo giant overhead and the app celebrates it with you.</p>
+          </article>
+          <article data-reveal>
+            <span>Next</span>
+            <h3>Boarding-pass stat cards</h3>
+            <p>Share your personal sky as a polished card: streak, miles, airports, and rare aircraft seen.</p>
+          </article>
+          <article data-reveal>
+            <span>Later</span>
+            <h3>Proactive copilot</h3>
+            <p>It speaks first when a flight you care about takes off, lands, delays, or changes route.</p>
+          </article>
+          <article data-reveal>
+            <span>Later</span>
+            <h3>Replay mode</h3>
+            <p>Rewind your own sky and watch the flights you followed move again across the globe.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer id="footer" class="site-footer">
+      <div class="footer-brand" data-reveal>
+        <img src="assets/aeronav3d-logo-orb.svg" alt="" width="54" height="54">
+        <div>
+          <strong>AeroNav</strong>
+          <span>Other apps show you the sky. AeroNav remembers yours.</span>
+        </div>
+      </div>
+      <div class="footer-links" data-reveal>
+        <a href="#hero">Home</a>
+        <a href="#copilot">About</a>
+        <a href="#layers">Features</a>
+        <a href="terms.html">Terms of service</a>
+        <a href="privacy.html">Privacy</a>
+        <a href="contact.html">Contact</a>
+      </div>
+      <p class="footer-note" data-reveal>
+        Free, ad-free, and built with private on-device history for aviation lovers.
+      </p>
+    </footer>
+  </body>
+</html>

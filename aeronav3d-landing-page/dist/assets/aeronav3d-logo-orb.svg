@@ -1,0 +1,62 @@
+<svg width="1200" height="1200" viewBox="0 0 1200 1200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="orbFill" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(720 345) rotate(116) scale(720)">
+      <stop offset="0" stop-color="#F4FAFF" stop-opacity="0.38"/>
+      <stop offset="0.33" stop-color="#AFCFFF" stop-opacity="0.17"/>
+      <stop offset="0.62" stop-color="#15263A" stop-opacity="0.46"/>
+      <stop offset="1" stop-color="#020711" stop-opacity="0.76"/>
+    </radialGradient>
+    <linearGradient id="orbStroke" x1="300" y1="180" x2="890" y2="980" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.88"/>
+      <stop offset="0.34" stop-color="#C7DDFF" stop-opacity="0.64"/>
+      <stop offset="0.7" stop-color="#4EA7FF" stop-opacity="0.48"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.72"/>
+    </linearGradient>
+    <radialGradient id="orbHighlight" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(535 275) rotate(74) scale(470 210)">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.64"/>
+      <stop offset="0.48" stop-color="#FFFFFF" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="planeFill" x1="348" y1="578" x2="846" y2="848" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.96"/>
+      <stop offset="0.45" stop-color="#EAF4FF" stop-opacity="0.86"/>
+      <stop offset="1" stop-color="#7C8793" stop-opacity="0.72"/>
+    </linearGradient>
+    <linearGradient id="planeFold" x1="617" y1="622" x2="742" y2="825" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.78"/>
+      <stop offset="1" stop-color="#5E6978" stop-opacity="0.68"/>
+    </linearGradient>
+    <filter id="softGlow" x="185" y="145" width="830" height="875" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="13" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.35  0 0 0 0 0.66  0 0 0 0 1  0 0 0 0.55 0"/>
+      <feBlend in="SourceGraphic" mode="screen"/>
+    </filter>
+    <filter id="glassBlur" x="235" y="175" width="730" height="790" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1.2"/>
+    </filter>
+    <filter id="planeGlow" x="280" y="330" width="640" height="620" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.85  0 0 0 0 0.94  0 0 0 0 1  0 0 0 0.62 0"/>
+      <feBlend in="SourceGraphic" mode="screen"/>
+    </filter>
+    <clipPath id="orbClip">
+      <circle cx="600" cy="600" r="355"/>
+    </clipPath>
+  </defs>
+  <g filter="url(#softGlow)">
+    <circle cx="600" cy="600" r="355" fill="url(#orbFill)" stroke="url(#orbStroke)" stroke-width="5"/>
+    <circle cx="600" cy="600" r="344" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="2"/>
+  </g>
+  <g clip-path="url(#orbClip)" filter="url(#glassBlur)" opacity="0.92">
+    <ellipse cx="555" cy="322" rx="315" ry="138" fill="url(#orbHighlight)"/>
+    <ellipse cx="410" cy="765" rx="190" ry="270" fill="#008CFF" fill-opacity="0.11"/>
+    <ellipse cx="760" cy="420" rx="210" ry="290" fill="#FFFFFF" fill-opacity="0.055"/>
+  </g>
+  <g filter="url(#planeGlow)">
+    <path d="M346 626L848 396L636 874L612 633L346 626Z" fill="url(#planeFill)"/>
+    <path d="M612 633L848 396L690 668L636 874L612 633Z" fill="url(#planeFold)"/>
+    <path d="M346 626L848 396L612 633L346 626Z" fill="#FFFFFF" fill-opacity="0.18"/>
+    <path d="M346 626L848 396L636 874" stroke="#FFFFFF" stroke-opacity="0.72" stroke-width="5" stroke-linejoin="round"/>
+    <path d="M612 633L636 874" stroke="#FFFFFF" stroke-opacity="0.34" stroke-width="4" stroke-linecap="round"/>
+  </g>
+</svg>
