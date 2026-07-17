@@ -360,18 +360,94 @@
   }
   .mf-toggle:hover{background:rgba(40,55,85,.85);border-color:rgba(120,180,255,.4);}
   .mf-toggle .star{color:#ffd76a;font-size:14px;}
+  /* ---------- Feature #5: My Flights shelf ----------
+     Slides out rather than appearing, so it reads as a drawer on the same
+     glass. Visibility (not display:none) so the slide can animate. */
   .mf-panel{
-    position:absolute;top:72px;right:20px;z-index:11;width:248px;
-    --glass-radius:12px;
-    display:none;overflow:hidden;
+    position:absolute;top:72px;right:20px;z-index:11;width:340px;
+    max-height:calc(100vh - 92px);
+    --glass-radius:14px;
+    display:flex;flex-direction:column;overflow:hidden;
+    opacity:0;visibility:hidden;pointer-events:none;
+    transform:translateX(14px) scale(.98);
+    transition:opacity .28s ease,
+      transform .28s cubic-bezier(.16,1,.3,1),
+      visibility 0s linear .28s;
+  }
+  .mf-panel.open{
+    opacity:1;visibility:visible;pointer-events:auto;
+    transform:none;
+    transition:opacity .28s ease,
+      transform .28s cubic-bezier(.16,1,.3,1),
+      visibility 0s;
+  }
+  @media (prefers-reduced-motion: reduce){
+    .mf-panel{transform:none;}
   }
   .mf-head{display:flex;justify-content:space-between;align-items:center;
-    padding:12px 14px 10px;border-bottom:1px solid var(--border);}
+    padding:12px 14px 10px;border-bottom:1px solid var(--border);flex:none;}
   .mf-title{font-size:13px;font-weight:700;letter-spacing:.08em;}
   .mf-head a{color:var(--muted);font-size:11px;text-decoration:none;cursor:pointer;}
   .mf-head a:hover{color:var(--text);}
-  .mf-list{max-height:290px;overflow-y:auto;}
+  .mf-list{flex:1;min-height:0;overflow-y:auto;}
   .mf-empty{padding:16px 14px;font-size:12px;color:var(--muted);line-height:1.5;}
+
+  /* Frosted favourite card: photo, live progress ring, ETA. The row is a
+     container, not a button — the fly-to target and the remove control are
+     separate real buttons so both are keyboard-reachable. */
+  .mf-card{display:flex;align-items:stretch;border-bottom:1px solid rgba(255,255,255,.07);}
+  .mf-card:last-child{border-bottom:none;}
+  .mf-go{
+    flex:1;min-width:0;display:flex;align-items:center;gap:10px;
+    padding:9px 4px 9px 12px;background:none;border:none;color:var(--text);
+    cursor:pointer;text-align:left;font:inherit;
+  }
+  .mf-go:hover{background:rgba(60,85,130,.30);}
+  .mf-thumb{
+    width:62px;height:44px;border-radius:8px;object-fit:cover;flex:none;
+    background:rgba(255,255,255,.06);
+  }
+  .mf-thumb[hidden]{display:none;}
+  /* Stand-in while the photo loads or when the airframe has none on file */
+  .mf-noimg{
+    width:62px;height:44px;border-radius:8px;flex:none;
+    background:rgba(255,255,255,.05);
+    display:flex;align-items:center;justify-content:center;
+    color:var(--muted);font-size:15px;
+  }
+  .mf-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
+  .mf-line{display:flex;align-items:center;gap:6px;min-width:0;}
+  .mf-dot{width:6px;height:6px;border-radius:50%;background:#39ff8e;
+    box-shadow:0 0 6px #39ff8e;flex:none;}
+  .mf-dot.off{background:#3a4660;box-shadow:none;}
+  .mf-cs{font-weight:650;letter-spacing:.04em;font-size:13.5px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .mf-sub,.mf-eta{font-size:10.5px;color:var(--muted);letter-spacing:.03em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .mf-eta b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;}
+  /* Progress ring — rotated so 0% starts at 12 o'clock */
+  .mf-ringwrap{position:relative;width:40px;height:40px;flex:none;}
+  .mf-ring{width:40px;height:40px;transform:rotate(-90deg);display:block;}
+  .mf-ring circle{fill:none;stroke-width:3;}
+  .mf-ring .rbg{stroke:rgba(255,255,255,.10);}
+  .mf-ring .rfg{
+    stroke:var(--accent);stroke-linecap:round;
+    filter:drop-shadow(0 0 3px rgba(76,195,255,.55));
+    transition:stroke-dashoffset .6s ease;
+  }
+  .mf-pct{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-size:9.5px;font-weight:650;font-variant-numeric:tabular-nums;color:var(--text);
+  }
+  .mf-rm{
+    flex:none;width:34px;background:none;border:none;cursor:pointer;
+    color:var(--muted);font-size:12px;
+  }
+  .mf-rm:hover{color:#ff7d7d;background:rgba(255,125,125,.08);}
+  @media (prefers-reduced-motion: reduce){ .mf-ring .rfg{transition:none;} }
+  @media (max-width:600px){
+    .mf-panel{top:64px;right:12px;left:12px;width:auto;max-height:calc(100vh - 84px);}
+  }
   .mf-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;
     padding:10px 14px;background:none;border:none;border-bottom:1px solid var(--border);
     color:var(--text);cursor:pointer;font-size:13px;}
@@ -594,7 +670,6 @@
     .hint{display:none;}
     .notice{top:auto;bottom:76px;right:12px;left:12px;max-width:none;}
     .mf-toggle{top:12px;right:12px;padding:8px 12px;}
-    .mf-panel{top:64px;right:12px;left:auto;width:248px;}
     /* The panel's fixed 392px overflows a 375px viewport, clipping the close
        button off-screen. Fit it to the width and stop short of the control
        stack so both stay usable. */
@@ -1503,23 +1578,33 @@ function currentLeg(airports, ac) {
   return best || [pts[0], pts[pts.length - 1]];
 }
 
+/* How far along its leg an aircraft is. Single source of truth: the detail
+ * panel and the My Flights shelf both read through here, so the ring and the
+ * bar can't disagree about the same flight.
+ * `mins` is null when the aircraft is too slow or too close to estimate. */
+function legProgress(ac, dep, dest) {
+  const covered = gcKm(dep.lat, dep.lon, ac.lat, ac.lon);
+  const left = gcKm(ac.lat, ac.lon, dest.lat, dest.lon);
+  const total = covered + left;
+  const pct = total > 0 ? Math.min(Math.max(covered / total * 100, 0), 100) : 0;
+  const gs = typeof ac.gs === "number" ? ac.gs : 0;
+  const mins = (gs > 80 && left > 5) ? Math.round(left / (gs * 1.852) * 60) : null;
+  return { covered, left, pct, mins, gs };
+}
+
 function updateRouteProgress(ac) {
   if (!routeEnds || routeHex !== ac.hex) return;
   const el = document.getElementById("rpFill");
   if (!el) return;
   const { dep, dest } = routeEnds;
-  const covered = gcKm(dep.lat, dep.lon, ac.lat, ac.lon);
-  const left = gcKm(ac.lat, ac.lon, dest.lat, dest.lon);
-  const pct = Math.min(Math.max(covered / (covered + left) * 100, 0), 100);
+  const { covered, left, pct, mins, gs } = legProgress(ac, dep, dest);
   el.style.width = pct + "%";
   document.getElementById("rpPlane").style.left = pct + "%";
   document.getElementById("rpCovered").textContent = Math.round(covered).toLocaleString() + " km";
   document.getElementById("rpLeft").textContent = Math.round(left).toLocaleString() + " km";
   const eta = document.getElementById("rpEta");
-  const gs = typeof ac.gs === "number" ? ac.gs : 0;
   const depT = document.getElementById("rpDepT");
-  if (gs > 80 && left > 5) {
-    const mins = Math.round(left / (gs * 1.852) * 60);
+  if (mins != null) {
     const h = Math.floor(mins / 60), m = mins % 60;
     eta.innerHTML = `Landing in <b>${h ? h + " h " : ""}${m} min</b> ` +
       '<span style="opacity:.65">(estimated)</span>';
@@ -2218,7 +2303,7 @@ async function pollFlights(retry) {
   document.getElementById("brandTag").textContent =
     flights.size ? `Global Navigation · ${flights.size} live` : "Global Navigation";
   if (selectedHex && flights.has(selectedHex)) updateFlightPanel(flights.get(selectedHex).data);
-  if (mfPanel.style.display === "block") renderMyFlights();
+  if (mfPanel.classList.contains("open")) renderMyFlights();
 }
 
 // Smooth motion between polls: advance every frame along track at ground speed
@@ -2324,20 +2409,20 @@ function renderPanelPhoto() {
   fpPhotoDots.style.display = multi ? "flex" : "none";
   fpPhotoWrap.style.display = "block";
 }
-async function updateAircraftPhoto(ac) {
-  const hex = (ac.hex || "").replace(/[^0-9a-f]/gi, ""); // strip TIS-B "~" prefix
-  if (hex === photoHex) return;
-  photoHex = hex;
-  photoList = []; photoIdx = 0;
-  fpPhotoWrap.style.display = "none";
-  if (!hex) return;
-  if (!photoCache.has(hex)) {
-    const reg = (ac.r || "").trim();
+/* Fetch + cache an airframe's photos. No DOM: the detail panel and the My
+ * Flights shelf both read through here, so one airframe is fetched once and
+ * the two views can never disagree about which photo is its photo.
+ * Without a registration only the Planespotters lookup (keyed by hex) can
+ * run — which is exactly the case for a favourite that isn't currently live. */
+async function loadPhotos(hex, reg) {
+  if (photoCache.has(hex)) return photoCache.get(hex);
+  {
     // Registrations get reused across airframes (Singapore's 9V-SM* flew on
     // 747s before today's A350s), so photos older than this airframe's build
     // year are someone else's plane — filter them out when the year is known.
+    // Only the reg-keyed sources need it, so skip the lookup without one.
     let builtYear = null;
-    try {
+    if (reg) try {
       const shard = await fetch(`db/ac/${hex.slice(0, 2)}.json`)
         .then(r => r.ok ? r.json() : null);
       builtYear = parseInt(shard?.[hex.slice(2)]?.[1], 10) || null;
@@ -2400,9 +2485,20 @@ async function updateAircraftPhoto(ac) {
     list.push(...commons.filter(p => !newest || !p.year || newest - p.year <= 10));
     // Keep it tight: the curated Planespotters shot + the latest Commons photos
     photoCache.set(hex, list.filter(p => p.src).slice(0, 3));
-    if (photoHex !== hex) return; // selection changed while loading
   }
-  photoList = photoCache.get(hex).slice();
+  return photoCache.get(hex);
+}
+
+async function updateAircraftPhoto(ac) {
+  const hex = (ac.hex || "").replace(/[^0-9a-f]/gi, ""); // strip TIS-B "~" prefix
+  if (hex === photoHex) return;
+  photoHex = hex;
+  photoList = []; photoIdx = 0;
+  fpPhotoWrap.style.display = "none";
+  if (!hex) return;
+  const list = await loadPhotos(hex, (ac.r || "").trim());
+  if (photoHex !== hex) return; // selection changed while loading
+  photoList = list.slice();
   photoIdx = 0;
   renderPanelPhoto();
 }
@@ -3323,15 +3419,27 @@ function updateStar() {
   btn.classList.toggle("active", !!isFav);
 }
 
+/* Single delete path. The star and the shelf's ✕ both route through here, so
+ * there is one write to reason about and the two views can't disagree about
+ * what is saved. */
+async function removeFavorite(hex) {
+  const existing = favorites.get(hex);
+  if (!existing) return;
+  const { error } = await sb.from("favorites").delete().eq("id", existing.id);
+  if (error) { console.warn("favorite remove failed:", error.message); return; }
+  favorites.delete(hex);
+  shelfLegs.delete(hex);
+  renderMyFlights();
+  updateStar();
+}
+
+let favWriting = false;   // in-flight guard: a double-click must not insert twice
 async function toggleFavorite() {
-  if (!selectedHex) return;
+  if (!selectedHex || favWriting) return;
   if (!session) { openAuth(); return; }
-  const existing = favorites.get(selectedHex);
-  if (existing) {
-    const { error } = await sb.from("favorites").delete().eq("id", existing.id);
-    if (!error) favorites.delete(existing.hex);
-    else console.warn("favorite remove failed:", error.message);
-  } else {
+  if (favorites.has(selectedHex)) { await removeFavorite(selectedHex); return; }
+  favWriting = true;
+  try {
     const f = flights.get(selectedHex);
     const callsign = (f && f.data && (f.data.flight || "").trim()) || selectedHex.toUpperCase();
     const { data, error } = await sb.from("favorites")
@@ -3339,13 +3447,39 @@ async function toggleFavorite() {
       .select("id,hex,callsign").single();
     if (!error && data) favorites.set(data.hex, data);
     else if (error) console.warn("favorite save failed:", error.message);
+  } finally {
+    favWriting = false;
   }
   renderMyFlights();
   updateStar();
 }
 
+function flyToFavorite(hex) {
+  const f = flights.get(hex);
+  if (!f || !f.data) return;
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(
+      f.data.lon, f.data.lat, flightAltitudeMeters(f.data) + 150_000),
+    duration: 1.8
+  });
+}
+
 function renderMyFlights() {
+  if (featureOn("myFlightsShelf")) {
+    const done = safe("myFlightsShelf", () => { renderMyFlightsShelf(); return true; });
+    if (done) return;
+  }
+  renderMyFlightsList();
+}
+
+/* Original compact list — the fallback when FEATURES.myFlightsShelf is off or
+ * the shelf has thrown. Kept whole so "off" is still a working feature. */
+function renderMyFlightsList() {
   const list = document.getElementById("mfList");
+  // This renderer owns the DOM now, so the shelf's "already built" key no
+  // longer describes what's on screen. Without this, switching the flag back
+  // on leaves the compact list up: the key still matches and nothing rebuilds.
+  shelfKey = null;
   if (!session) {
     list.innerHTML = '<div class="mf-empty">Sign in to save flights and see when they\'re live on the globe.</div>';
     return;
@@ -3365,21 +3499,168 @@ function renderMyFlights() {
       (liveNow ? '<span class="live">LIVE</span>' : "") +
       '<span class="rm" title="Remove">✕</span>';
     item.querySelector(".cs").textContent = fav.callsign || fav.hex.toUpperCase();
-    item.querySelector(".rm").addEventListener("click", async (e) => {
+    item.querySelector(".rm").addEventListener("click", (e) => {
       e.stopPropagation();
-      const { error } = await sb.from("favorites").delete().eq("id", fav.id);
-      if (!error) { favorites.delete(fav.hex); renderMyFlights(); updateStar(); }
+      removeFavorite(fav.hex);
     });
-    item.addEventListener("click", () => {
-      const f = flights.get(fav.hex);
-      if (!f || !f.data) return;
-      viewer.camera.flyTo({
-        destination: Cesium.Cartesian3.fromDegrees(
-          f.data.lon, f.data.lat, flightAltitudeMeters(f.data) + 150_000),
-        duration: 1.8
-      });
-    });
+    item.addEventListener("click", () => flyToFavorite(fav.hex));
     list.appendChild(item);
+  });
+}
+
+/* ----- Feature #5: My Flights glass shelf -----
+ * Cards are rebuilt only when the saved set changes, never on every poll:
+ * rebuilding would restart each photo fetch and throw away the scroll
+ * position. The live bits (ring, ETA, dot) are updated in place instead. */
+const RING_R = 15.5;
+const RING_C = 2 * Math.PI * RING_R;
+const shelfLegs = new Map();   // hex -> {dep,dest} | null (null = no route on file)
+let shelfKey = null;           // which favourites the current cards represent
+
+function setRing(circle, pct) {
+  circle.style.strokeDasharray = RING_C.toFixed(2);
+  circle.style.strokeDashoffset = (RING_C * (1 - Math.min(Math.max(pct, 0), 100) / 100)).toFixed(2);
+}
+
+function renderMyFlightsShelf() {
+  const list = document.getElementById("mfList");
+  if (!session) {
+    shelfKey = null;
+    list.innerHTML = '<div class="mf-empty">Sign in to save flights and see when they\'re live on the globe.</div>';
+    return;
+  }
+  if (!favorites.size) {
+    shelfKey = null;
+    list.innerHTML = '<div class="mf-empty">No saved flights yet. Click a plane, then tap the ☆ in its panel.</div>';
+    return;
+  }
+  // Build on open, not on load: hydrating a card costs a photo lookup per
+  // airframe, and nobody should pay for that for a shelf they never opened.
+  if (!mfPanel.classList.contains("open")) { shelfKey = null; return; }
+  const key = [...favorites.keys()].sort().join(",");
+  if (key !== shelfKey) { shelfKey = key; buildShelfCards(list); }
+  refreshShelfLive();
+}
+
+function buildShelfCards(list) {
+  list.innerHTML = "";
+  favorites.forEach((fav) => {
+    const cs = fav.callsign || fav.hex.toUpperCase();
+    const card = document.createElement("div");
+    card.className = "mf-card";
+    card.dataset.hex = fav.hex;
+    card.innerHTML =
+      '<button class="mf-go">' +
+        '<span class="mf-noimg" aria-hidden="true">✈</span>' +
+        '<img class="mf-thumb" alt="" hidden>' +
+        '<span class="mf-body">' +
+          '<span class="mf-line"><i class="mf-dot off"></i><span class="mf-cs"></span></span>' +
+          '<span class="mf-sub"></span>' +
+          '<span class="mf-eta"></span>' +
+        "</span>" +
+        '<span class="mf-ringwrap">' +
+          `<svg class="mf-ring" viewBox="0 0 36 36" aria-hidden="true">` +
+            `<circle class="rbg" cx="18" cy="18" r="${RING_R}"></circle>` +
+            `<circle class="rfg" cx="18" cy="18" r="${RING_R}"></circle>` +
+          "</svg>" +
+          '<span class="mf-pct">—</span>' +
+        "</span>" +
+      "</button>" +
+      '<button class="mf-rm" title="Remove">✕</button>';
+    card.querySelector(".mf-cs").textContent = cs;
+    const go = card.querySelector(".mf-go");
+    go.setAttribute("aria-label", `Fly to ${cs}`);
+    go.addEventListener("click", () => flyToFavorite(fav.hex));
+    const rm = card.querySelector(".mf-rm");
+    rm.setAttribute("aria-label", `Remove ${cs} from My Flights`);
+    rm.addEventListener("click", (e) => { e.stopPropagation(); removeFavorite(fav.hex); });
+    setRing(card.querySelector(".rfg"), 0);
+    list.appendChild(card);
+    hydrateShelfCard(card, fav);
+  });
+}
+
+/* Photo + route for one card. Both are one-shot and cached (loadPhotos by
+ * airframe, routeCache by callsign) — no second polling loop; the live values
+ * still ride the existing refresh cycle. */
+function hydrateShelfCard(card, fav) {
+  const f = flights.get(fav.hex);
+  const hex = (fav.hex || "").replace(/[^0-9a-f]/gi, "");
+
+  safeAsync("myFlightsShelf", async () => {
+    if (!hex) return;
+    const photos = await loadPhotos(hex, (f && f.data && (f.data.r || "").trim()) || "");
+    if (!card.isConnected || !photos || !photos.length) return;
+    const img = card.querySelector(".mf-thumb");
+    img.addEventListener("error", () => {   // dead URL: keep the stand-in
+      img.hidden = true;
+      const ph = card.querySelector(".mf-noimg");
+      if (ph) ph.style.display = "";
+    }, { once: true });
+    img.src = photos[0].src;
+    img.hidden = false;
+    const ph = card.querySelector(".mf-noimg");
+    if (ph) ph.style.display = "none";
+  });
+
+  safeAsync("myFlightsShelf", async () => {
+    const cs = (f && f.data && (f.data.flight || "").trim()) || "";
+    if (!f || !f.data || !cs) return;             // not live: nothing to look up against
+    let route = routeCache.get(cs);
+    if (route === undefined) {
+      route = await lookupRoute(cs, f.data.lat, f.data.lon);
+      routeCache.set(cs, route);
+    }
+    if (!card.isConnected || !route || !route.airports || route.airports.length < 2) return;
+    const [dep, dest] = currentLeg(route.airports, f.data);
+    if (!dep || !dest || typeof dep.lat !== "number" || typeof dest.lat !== "number") return;
+    shelfLegs.set(fav.hex, { dep, dest });
+    refreshShelfLive();
+  });
+}
+
+function refreshShelfLive() {
+  const list = document.getElementById("mfList");
+  list.querySelectorAll(".mf-card").forEach((card) => {
+    const hex = card.dataset.hex;
+    const f = flights.get(hex);
+    const live = !!(f && f.data);
+    const leg = shelfLegs.get(hex);
+    card.querySelector(".mf-dot").classList.toggle("off", !live);
+    const sub = card.querySelector(".mf-sub");
+    const eta = card.querySelector(".mf-eta");
+    const pctEl = card.querySelector(".mf-pct");
+    const ring = card.querySelector(".rfg");
+
+    if (!live) {
+      sub.textContent = "Not in view";
+      eta.textContent = "";
+      pctEl.textContent = "—";
+      setRing(ring, 0);
+      return;
+    }
+    const ac = f.data;
+    const airline = airlineFor((ac.flight || "").trim());
+    if (leg) {
+      const p = legProgress(ac, leg.dep, leg.dest);
+      sub.textContent = `${leg.dep.iata || leg.dep.icao} → ${leg.dest.iata || leg.dest.icao}`;
+      setRing(ring, p.pct);
+      pctEl.textContent = Math.round(p.pct) + "%";
+      if (p.mins != null) {
+        const h = Math.floor(p.mins / 60), m = p.mins % 60;
+        eta.innerHTML = `Lands in <b>${h ? h + " h " : ""}${m} min</b>`;
+      } else {
+        eta.textContent = p.left <= 5 ? "Arriving" : "";
+      }
+    } else {
+      // Live but no route on file (GA, military, cargo repositioning) — the
+      // ring has nothing to measure, so show what we do know.
+      sub.textContent = (airline && airline[1]) || (ac.t ? String(ac.t) : "In view");
+      eta.textContent = typeof ac.alt_baro === "number"
+        ? Math.round(ac.alt_baro).toLocaleString() + " ft" : "";
+      pctEl.textContent = "—";
+      setRing(ring, 0);
+    }
   });
 }
 
@@ -3421,8 +3702,8 @@ async function submitAuth() {
 
 document.getElementById("fpStar").addEventListener("click", toggleFavorite);
 document.getElementById("mfToggle").addEventListener("click", () => {
-  const open = mfPanel.style.display === "block";
-  mfPanel.style.display = open ? "none" : "block";
+  const open = mfPanel.classList.contains("open");
+  mfPanel.classList.toggle("open", !open);
   document.getElementById("mfToggle").setAttribute("aria-expanded", String(!open));
   if (!open) renderMyFlights();
 });
@@ -3436,6 +3717,9 @@ document.getElementById("authPass").addEventListener("keydown", (e) => {
   if (e.key === "Enter") submitAuth();
 });
 setAuthMode(false);
+// If the shelf ever throws, fall back to the compact list rather than an
+// empty drawer: featureOn() is already false by the time this runs.
+onFeatureFail("myFlightsShelf", () => { shelfKey = null; renderMyFlightsList(); });
 refreshFavorites();
 
 /* ---------------- Controls ---------------- */
