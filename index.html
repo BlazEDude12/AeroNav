@@ -598,26 +598,63 @@
      input), and the compass (which draws its own curved one below). */
   .hint::before,.search::before,.map-toggle::before,.search-results::before{content:none;}
 
-  /* ---------- .glass--liquid — refracted rim ----------
-     Frosted glass is backdrop-filter alone; liquid glass adds a warped,
-     light-bending edge. The displacement map is applied to a rim-only
-     pseudo-element rather than the surface itself: filtering the surface
-     would displace its TEXT too (visibly garbled at any useful scale) and
-     force the whole panel through an SVG filter every repaint. The rim
-     carries no text, so it can warp freely and stay cheap. */
   /* :where() keeps this at zero specificity so it can never beat a host's own
      `position` (a plain `.glass--liquid{position:relative}` silently overrode
      .panel's `position:absolute`, dropping it into normal flow). Hosts that
      already position themselves win; unpositioned ones still get a context
      for ::before/::after. */
   :where(.glass,.glass--liquid){position:relative;}
+
+  /* ---------- .glass--liquid — a slab of glass, not a sheet ----------
+     Frosted glass is backdrop-filter alone. Liquid glass has to read as a
+     solid block with thickness: light catches its bevelled rim, the body
+     glows faintly, and the whole thing sits above the map rather than being
+     printed on it.
+
+     Deliberately NOT an feTurbulence displacement. Fractal noise drags the
+     border into a torn, wavy outline that reads as a rendering fault rather
+     than as bent light — and putting a filter on the surface would garble its
+     text as well. The look comes from bevel + specular geometry instead,
+     which is also what makes it survive on any GPU. */
+  .glass--liquid{
+    border-radius:calc(var(--glass-radius) + 5px);
+    box-shadow:
+      inset 0 1.5px 0 rgba(var(--glass-tint),.50),    /* lit top edge */
+      inset 1.5px 0 0 rgba(var(--glass-tint),.16),    /* lit left edge */
+      inset -1.5px 0 0 rgba(0,0,0,.20),               /* shaded right edge */
+      inset 0 -1.5px 0 rgba(0,0,0,.42),               /* shaded bottom edge */
+      inset 0 0 30px rgba(var(--glass-tint),.05),     /* body glow = thickness */
+      0 0 0 .5px rgba(var(--glass-tint),.15),         /* crisp outer stroke */
+      0 10px 24px -10px rgba(0,0,0,.55),
+      0 32px 66px -20px rgba(0,0,0,.80);
+  }
+  /* Inner bevel: a soft band just inside the rim reads as the glass having
+     depth, the way a thick lens darkens slightly before its edge. */
+  .glass--liquid::before{
+    content:"";position:absolute;inset:0;
+    left:0;right:0;top:0;height:auto;               /* undo .glass::before's hairline */
+    border-radius:inherit;pointer-events:none;z-index:1;
+    background:
+      radial-gradient(120% 100% at 50% -20%, rgba(var(--glass-tint),.12), transparent 55%),
+      linear-gradient(180deg, transparent 62%, rgba(0,0,0,.14));
+  }
+  /* Specular rim: bright where a light above-left would catch the bevel, dark
+     through the middle, catching again on the far edge. Masked to a hairline
+     ring so it traces the border exactly — this is what makes it read as 3D. */
   .glass--liquid::after{
     content:"";position:absolute;inset:0;border-radius:inherit;
-    pointer-events:none;z-index:2;
-    box-shadow:inset 0 0 0 1.5px rgba(var(--glass-tint),.42),
-               inset 0 0 12px rgba(var(--glass-tint),.10);
-    filter:url(#liquid);
-    mix-blend-mode:screen;
+    padding:1.25px;pointer-events:none;z-index:2;
+    background:linear-gradient(145deg,
+      rgba(var(--glass-tint),.90) 0%,
+      rgba(var(--glass-tint),.28) 18%,
+      rgba(var(--glass-tint),.02) 42%,
+      rgba(var(--glass-tint),.02) 62%,
+      rgba(var(--glass-tint),.30) 84%,
+      rgba(var(--glass-tint),.70) 100%);
+    -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite:xor;
+            mask-composite:exclude;
   }
   /* ---------- Feature #8: expanded detail sheet ----------
      The sheet is the SAME panel, widened — not a second copy. Duplicating the
@@ -685,14 +722,13 @@
   .wx-card.glass{border-color:rgba(76,195,255,.28);}
 
   /* ---------- Glass: degradation paths ----------
-     1. Reduced motion — drop the warp; it's decorative refraction.
-     2. Perf mode (body.perf) — same, plus a cheaper blur; set by Feature #10.
-     3. No backdrop-filter support — the wash over a near-opaque scrim, so
-        text keeps its contrast with no blur to lean on. */
-  @media (prefers-reduced-motion: reduce){
-    .glass--liquid::after{filter:none;}
-  }
-  body.perf .glass--liquid::after{filter:none;}
+     1. Perf mode (body.perf) — flatten the slab to plain frosted glass and
+        cheapen the blur; set by Feature #10.
+     2. No backdrop-filter support — the wash over a near-opaque scrim, so
+        text keeps its contrast with no blur to lean on.
+     (Reduced motion isn't one: the rim is static geometry, not an animation.) */
+  body.perf .glass--liquid::before,
+  body.perf .glass--liquid::after{display:none;}
   body.perf{--glass-blur:6px;--glass-sat:110%;}
   /* FEATURES.glassSystem = false. .glass now supplies every surface's
      background, so "off" can't mean "no rule" — it means a flat opaque HUD. */
@@ -700,10 +736,10 @@
     backdrop-filter:none;-webkit-backdrop-filter:none;
     background:rgba(var(--glass-scrim),.94);
   }
+  body.no-glass .glass--liquid::before,
   body.no-glass .glass--liquid::after{display:none;}
   @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))){
     :root{--glass-scrim-alpha:.94;}
-    .glass--liquid::after{filter:none;}
   }
 
   /* Below 900px the centred bar would collide with the brand badge and
@@ -751,18 +787,6 @@
 </style>
 </head>
 <body>
-
-<!-- Displacement map for .glass--liquid rims. baseFrequency stays low:
-     higher values read as grain/noise rather than bent light. -->
-<svg aria-hidden="true" focusable="false" style="position:absolute;width:0;height:0">
-  <filter id="liquid" x="-25%" y="-25%" width="150%" height="150%"
-          color-interpolation-filters="sRGB">
-    <feTurbulence type="fractalNoise" baseFrequency="0.008 0.008"
-                  numOctaves="2" seed="7" result="n"/>
-    <feDisplacementMap in="SourceGraphic" in2="n" scale="12"
-                       xChannelSelector="R" yChannelSelector="G"/>
-  </filter>
-</svg>
 
 <div id="globe"></div>
 
