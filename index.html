@@ -161,6 +161,16 @@
   .controls button:hover{background:rgba(40,55,85,.85);border-color:rgba(120,180,255,.4);}
   .controls button:active{transform:scale(.94);}
   .controls .divider{height:1px;background:var(--border);margin:2px 4px;}
+  .controls .compass{border-radius:50%;}
+  /* Curve the specular top highlight along the circular edge */
+  .controls .compass::before{
+    left:0;right:0;top:0;bottom:0;height:auto;
+    background:none;border-radius:50%;
+    border-top:1px solid rgba(255,255,255,.6);
+    -webkit-mask-image:linear-gradient(90deg,transparent,#fff 40%,#fff 60%,transparent);
+    mask-image:linear-gradient(90deg,transparent,#fff 40%,#fff 60%,transparent);
+  }
+  .controls .compass svg{transition:transform .2s ease-out;}
 
   /* ---------- Hint / status ---------- */
   .hint{
@@ -602,6 +612,12 @@
 
 <!-- Camera controls -->
 <div class="controls" aria-label="Globe controls">
+  <button id="compass" class="compass" title="Point north" aria-label="Point north">
+    <svg id="compassNeedle" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+      <path d="M8.8 11.5 L12 2 L15.2 11.5 Z" fill="#e53935"/>
+      <text x="12" y="21.5" text-anchor="middle" font-size="9" font-weight="800" fill="#f5f5f5">N</text>
+    </svg>
+  </button>
   <button id="zoomIn"  title="Zoom in"  aria-label="Zoom in">+</button>
   <button id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
   <div class="divider"></div>
@@ -3070,6 +3086,25 @@ function tilt(deltaDeg) {
   );
   cam.setView({ orientation: { heading: cam.heading, pitch, roll: 0 } });
 }
+
+// Compass: needle mirrors camera heading; click to face north again
+const compassNeedle = document.getElementById("compassNeedle");
+let lastHeading = null;
+viewer.scene.postRender.addEventListener(() => {
+  const heading = viewer.camera.heading;
+  if (heading === lastHeading) return;
+  lastHeading = heading;
+  compassNeedle.style.transform =
+    `rotate(${-Cesium.Math.toDegrees(heading)}deg)`;
+});
+document.getElementById("compass").addEventListener("click", () => {
+  const cam = viewer.camera;
+  cam.flyTo({
+    destination: cam.position.clone(),
+    orientation: { heading: 0, pitch: cam.pitch, roll: 0 },
+    duration: 0.8,
+  });
+});
 
 document.getElementById("zoomIn").addEventListener("click", () => zoom(0.4));
 document.getElementById("zoomOut").addEventListener("click", () => zoom(-0.6));
