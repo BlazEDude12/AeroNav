@@ -1539,12 +1539,32 @@ const AIRPORT_PIN = (() => {
   return c.toDataURL();
 })();
 
-function addRouteVisuals(hex, dep, dest) {
+// Canonical pin position for an airport: the mean of its runway thresholds,
+// exactly as the runway overlay computes it. Route markers snap to this so
+// the pin never jumps when a route replaces the overlay's per-airport pin;
+// airports absent from the runway db fall back to their reference point.
+function runwayCentroid(ident) {
+  const rwys = ident && runwayDb && runwayDb[ident];
+  if (!rwys) return null;
+  let cLat = 0, cLon = 0, ends = 0;
+  for (const [le, he, laLat, laLon, hbLat, hbLon] of rwys) {
+    if (!isRealRunway(le, he)) continue;
+    cLat += laLat + hbLat; cLon += laLon + hbLon; ends += 2;
+  }
+  return ends ? { lat: cLat / ends, lon: cLon / ends } : null;
+}
+
+async function addRouteVisuals(hex, dep, dest) {
+  await loadRunwayDb();
+  if (routeHex !== hex) return; // selection changed while loading
+  let destPin = null;
   for (const ap of [dep, dest]) {
     if (typeof ap.lat !== "number" || typeof ap.lon !== "number") continue;
-    routePinCoords.push({ lat: ap.lat, lon: ap.lon });
+    const pin = runwayCentroid(ap.icao) || { lat: ap.lat, lon: ap.lon };
+    if (ap === dest) destPin = pin;
+    routePinCoords.push(pin);
     routeMarkers.push(viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(ap.lon, ap.lat),
+      position: Cesium.Cartesian3.fromDegrees(pin.lon, pin.lat),
       billboard: {
         image: AIRPORT_PIN,
         width: 24, height: 32,
@@ -1565,8 +1585,8 @@ function addRouteVisuals(hex, dep, dest) {
     }));
   }
   refreshRunwayPins();
-  if (typeof dest.lat !== "number" || typeof dest.lon !== "number") return;
-  const destPos = Cesium.Cartesian3.fromDegrees(dest.lon, dest.lat);
+  if (!destPin) return;
+  const destPos = Cesium.Cartesian3.fromDegrees(destPin.lon, destPin.lat);
   destLine = viewer.entities.add({
     polyline: {
       positions: new Cesium.CallbackProperty(() => {
