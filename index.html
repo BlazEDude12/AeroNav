@@ -460,6 +460,71 @@
   .mf-item .live{font-size:9px;letter-spacing:.2em;color:#39ff8e;}
   .mf-item .rm{color:var(--muted);font-size:12px;padding:2px 4px;}
   .mf-item .rm:hover{color:#ff7d7d;}
+  /* ---------- Feature #3: replay scrubber ---------- */
+  .scrub{
+    position:absolute;left:50%;bottom:24px;z-index:13;
+    transform:translateX(-50%);
+    width:min(720px,calc(100vw - 150px));
+    display:flex;align-items:center;gap:12px;padding:10px 14px;
+    --glass-radius:999px;
+    opacity:0;visibility:hidden;pointer-events:none;
+    transition:opacity .25s ease,visibility 0s linear .25s;
+  }
+  .scrub.open{
+    opacity:1;visibility:visible;pointer-events:auto;
+    transition:opacity .25s ease,visibility 0s;
+  }
+  /* The panel can run the full height of the viewport, and the bar lives at the
+     bottom of the same column — so give the bar its own strip while it's up
+     rather than letting it sit on top of the arrival row. */
+  body.scrubbing .panel{max-height:calc(100vh - 176px);}
+  .scrub-live{
+    flex:none;border:1px solid rgba(var(--glass-tint),.18);cursor:pointer;
+    background:rgba(var(--glass-tint),.06);color:var(--muted);
+    font:inherit;font-size:9px;font-weight:700;letter-spacing:.16em;
+    padding:4px 9px;border-radius:999px;transition:color .18s,background .18s,border-color .18s;
+  }
+  .scrub.replaying .scrub-live{
+    color:#04121d;background:var(--accent);border-color:transparent;
+  }
+  .scrub-track{
+    position:relative;flex:1;min-width:0;height:22px;cursor:pointer;
+    display:flex;align-items:center;touch-action:none;
+  }
+  .scrub-rail{
+    position:absolute;left:0;right:0;height:4px;border-radius:99px;
+    background:rgba(255,255,255,.10);
+    box-shadow:inset 0 1px 2px rgba(0,0,0,.5);
+  }
+  .scrub-fill{
+    position:absolute;left:0;height:4px;border-radius:99px;width:100%;
+    background:linear-gradient(90deg,#2f86ff,var(--accent));
+    box-shadow:0 0 8px rgba(76,195,255,.45);
+  }
+  /* Handle is its own little slab of glass */
+  .scrub-handle{
+    position:absolute;left:100%;top:50%;width:20px;height:20px;
+    margin:-10px 0 0 -10px;
+    --glass-radius:50%;--glass-scrim-alpha:.55;
+    cursor:grab;padding:0;
+  }
+  .scrub-handle:active{cursor:grabbing;}
+  .scrub-handle:focus-visible{outline:2px solid rgba(120,180,255,.75);outline-offset:3px;}
+  .scrub-time{
+    flex:none;min-width:74px;text-align:right;
+    font-size:11px;font-variant-numeric:tabular-nums;color:var(--muted);
+    letter-spacing:.04em;
+  }
+  .scrub.replaying .scrub-time{color:var(--text);}
+  @media (prefers-reduced-motion: reduce){
+    .scrub{transition:none;}
+  }
+  @media (max-width:600px){
+    .scrub{width:calc(100vw - 24px);bottom:16px;gap:8px;padding:8px 10px;}
+    .scrub-time{min-width:60px;font-size:10px;}
+    body.scrubbing .panel{max-height:calc(100vh - 196px);}
+  }
+
   /* ---------- Feature #6: command palette ---------- */
   .cmdk{
     position:absolute;inset:0;z-index:40;
@@ -924,6 +989,19 @@
     <a id="mfAuthLink">Sign in</a>
   </div>
   <div class="mf-list" id="mfList"></div>
+</div>
+
+<!-- Replay scrubber (Feature #3) -->
+<div class="scrub glass" id="scrub">
+  <button class="scrub-live" id="scrubLive" title="Return to live">LIVE</button>
+  <div class="scrub-track" id="scrubTrack">
+    <div class="scrub-rail"></div>
+    <div class="scrub-fill" id="scrubFill"></div>
+    <div class="scrub-handle glass glass--liquid" id="scrubHandle" role="slider" tabindex="0"
+         aria-label="Replay position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"
+         aria-valuetext="Live"></div>
+  </div>
+  <div class="scrub-time" id="scrubTime">LIVE</div>
 </div>
 
 <!-- Command palette (⌘K / Ctrl+K) -->
@@ -1528,6 +1606,7 @@ async function showTrail(hex) {
   trailLastFix = seg.length ? { lat: prevLat, lon: prevLon } : null;
   rebuildLiveTrail();
   rebuildRibbon();
+  safe("timelineScrubber", () => syncScrubber());
 }
 
 function extendTrail(ac) {
@@ -2939,6 +3018,11 @@ function squawkInfo(ac) {
 }
 
 function updateFlightPanel(ac) {
+  // While replaying, the panel renders the scrubbed fix instead of the live
+  // one. This swaps what is DISPLAYED only — the flights map, the billboards
+  // and the poll cycle are never touched, so the feed keeps running underneath
+  // and releasing the handle snaps straight back to it.
+  if (scrubActive && scrubAc && ac && ac.hex === scrubAc.hex) ac = scrubAc;
   const callsign = (ac.flight || "").trim() || ac.hex.toUpperCase();
   updateAirlineLogo(callsign);
   updateAircraftPhoto(ac);
@@ -3047,6 +3131,194 @@ function initDetailSheet() {
 }
 initDetailSheet();
 
+/* ----- Feature #3: replay scrubber -----
+ * Drags a ghost aircraft back along the stored path. Reads trailHistory, which
+ * showTrail already fetched for the trail — no extra query, no second loop. */
+const scrubEl = document.getElementById("scrub");
+const scrubTrack = document.getElementById("scrubTrack");
+const scrubHandle = document.getElementById("scrubHandle");
+const scrubFill = document.getElementById("scrubFill");
+const scrubTimeEl = document.getElementById("scrubTime");
+let scrubActive = false;      // true = panel shows a past fix
+let scrubAc = null;           // synthetic ac at the scrubbed instant
+let ghostBillboards = null;   // created on first replay, reused after
+let ghostBb = null;
+
+function scrubSpan() {
+  if (trailHistory.length < 2) return null;
+  const t0 = trailHistory[0].t, t1 = trailHistory[trailHistory.length - 1].t;
+  return t1 > t0 ? { t0, t1 } : null;
+}
+
+/* Position/altitude at an arbitrary instant, linearly interpolated between the
+ * two surrounding fixes. Speed and track are derived from that same pair, so
+ * the readouts during replay are the aircraft's real values then — not the
+ * live ones wearing a past position. */
+function scrubFixAt(t) {
+  const h = trailHistory;
+  if (h.length < 2) return null;
+  let lo = 0, hi = h.length - 1;
+  if (t <= h[0].t) return { ...h[0], gs: null, track: null };
+  if (t >= h[hi].t) return { ...h[hi], gs: null, track: null };
+  while (hi - lo > 1) {                       // binary search: the history can be long
+    const mid = (lo + hi) >> 1;
+    if (h[mid].t <= t) lo = mid; else hi = mid;
+  }
+  const a = h[lo], b = h[hi];
+  const span = b.t - a.t;
+  const f = span > 0 ? (t - a.t) / span : 0;
+  const lat = a.lat + (b.lat - a.lat) * f;
+  const lon = a.lon + (b.lon - a.lon) * f;
+  const altFt = a.altFt + (b.altFt - a.altFt) * f;
+  const km = gcKm(a.lat, a.lon, b.lat, b.lon);
+  const gs = span > 0 ? (km / (span / 3600000)) / 1.852 : null;   // km/h -> knots
+  const track = km > 0.001 ? bearingDeg(a.lat, a.lon, b.lat, b.lon) : null;
+  return { t, lat, lon, altFt, gs, track };
+}
+
+function ensureGhost(klass) {
+  if (!ghostBillboards) {
+    ghostBillboards = viewer.scene.primitives.add(new Cesium.BillboardCollection({ scene }));
+  }
+  const ic = ICONS[klass] || ICONS.jet;
+  if (!ghostBb) {
+    ghostBb = ghostBillboards.add({
+      image: ic.image, width: ic.size, height: ic.size,
+      // No "plane:" id — pickPlaneId must never hand the ghost to selectFlight.
+      id: "ghost",
+      color: Cesium.Color.WHITE.withAlpha(0.55),
+      scaleByDistance: new Cesium.NearFarScalar(5e5, 1.0, 1.5e7, 0.35)
+    });
+  } else {
+    ghostBb.image = ic.image; ghostBb.width = ic.size; ghostBb.height = ic.size;
+  }
+  ghostBb.show = true;
+  return ghostBb;
+}
+
+function hideGhost() {
+  if (ghostBb) ghostBb.show = false;
+}
+
+function clearScrub() {
+  scrubActive = false;
+  scrubAc = null;
+  hideGhost();
+  scrubEl.classList.remove("open", "replaying");
+  document.body.classList.remove("scrubbing");
+}
+
+/* Show/hide the bar for the current selection. Hidden when there's no history
+ * to replay, which is most GA traffic. */
+function syncScrubber() {
+  if (!featureOn("timelineScrubber") || !selectedHex || !scrubSpan()) {
+    if (scrubActive) exitReplay();
+    scrubEl.classList.remove("open");
+    document.body.classList.remove("scrubbing");
+    return;
+  }
+  scrubEl.classList.add("open");
+  document.body.classList.add("scrubbing");              // shortens the panel to clear the bar
+  document.getElementById("hint").style.opacity = "0";   // same corner; the tip has had its turn
+  if (!scrubActive) setScrubUi(1, null);
+}
+
+function setScrubUi(frac, label) {
+  const pct = Math.min(Math.max(frac, 0), 1) * 100;
+  scrubFill.style.width = pct + "%";
+  scrubHandle.style.left = pct + "%";
+  scrubHandle.setAttribute("aria-valuenow", String(Math.round(pct)));
+  scrubHandle.setAttribute("aria-valuetext", label || "Live");
+  scrubTimeEl.textContent = label || "LIVE";
+}
+
+function exitReplay() {
+  if (!scrubActive) return;
+  scrubActive = false;
+  scrubAc = null;
+  hideGhost();
+  scrubEl.classList.remove("replaying");
+  setScrubUi(1, null);
+  // Snap the panel back to the live fix that has been arriving all along.
+  const f = selectedHex && flights.get(selectedHex);
+  if (f && f.data) updateFlightPanel(f.data);
+}
+
+function scrubTo(frac) {
+  safe("timelineScrubber", () => {
+    const span = scrubSpan();
+    if (!span || !selectedHex) return;
+    if (frac >= 0.999) { exitReplay(); return; }   // dragged back to now = live
+    const t = span.t0 + (span.t1 - span.t0) * Math.min(Math.max(frac, 0), 1);
+    const fix = scrubFixAt(t);
+    if (!fix) return;
+    const rec = flights.get(selectedHex);
+    const live = (rec && rec.data) || {};
+    // Identity fields from the live record, motion fields from the fix.
+    scrubAc = {
+      ...live,
+      hex: selectedHex,
+      lat: fix.lat, lon: fix.lon,
+      alt_baro: Math.round(fix.altFt),
+      gs: fix.gs != null ? Math.round(fix.gs) : live.gs,
+      track: fix.track != null ? Math.round(fix.track) : live.track,
+      baro_rate: undefined            // a past vertical rate isn't in the history
+    };
+    scrubActive = true;
+    scrubEl.classList.add("replaying");
+
+    const g = ensureGhost(rec ? rec.klass : "jet");
+    g.position = Cesium.Cartesian3.fromDegrees(fix.lon, fix.lat, fix.altFt * FT_TO_M);
+    g.rotation = viewer.camera.heading - Cesium.Math.toRadians(fix.track || 0);
+
+    const ago = Math.max(0, Math.round((span.t1 - t) / 60000));
+    setScrubUi(frac, ago === 0 ? "now" : `−${ago} min`);
+    updateFlightPanel(scrubAc);
+  });
+}
+
+function scrubFracFromX(clientX) {
+  const r = scrubTrack.getBoundingClientRect();
+  if (!r.width) return 1;
+  return (clientX - r.left) / r.width;
+}
+
+onFeatureFail("timelineScrubber", () => {
+  scrubActive = false; scrubAc = null; hideGhost();
+  scrubEl.classList.remove("open", "replaying");
+  document.body.classList.remove("scrubbing");
+  scrubEl.style.display = "none";
+});
+
+if (featureOn("timelineScrubber")) {
+  let dragging = false;
+  const onDown = (e) => {
+    if (!scrubSpan()) return;
+    dragging = true;
+    scrubTrack.setPointerCapture?.(e.pointerId);
+    scrubTo(scrubFracFromX(e.clientX));
+    e.preventDefault();
+  };
+  scrubTrack.addEventListener("pointerdown", onDown);
+  scrubTrack.addEventListener("pointermove", (e) => { if (dragging) scrubTo(scrubFracFromX(e.clientX)); });
+  const end = () => { dragging = false; };
+  scrubTrack.addEventListener("pointerup", end);
+  scrubTrack.addEventListener("pointercancel", end);
+
+  // Keyboard: the handle is a real slider.
+  scrubHandle.addEventListener("keydown", (e) => safe("timelineScrubber", () => {
+    if (!scrubSpan()) return;
+    const now = parseFloat(scrubHandle.getAttribute("aria-valuenow")) / 100;
+    const stepK = e.shiftKey ? 0.1 : 0.02;
+    if (e.key === "ArrowLeft") { e.preventDefault(); scrubTo(now - stepK); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); scrubTo(now + stepK); }
+    else if (e.key === "Home") { e.preventDefault(); scrubTo(0); }
+    else if (e.key === "End" || e.key === "Escape") { e.preventDefault(); exitReplay(); }
+  }));
+
+  document.getElementById("scrubLive").addEventListener("click", () => exitReplay());
+}
+
 function setSelectedColor(hex, selected) {
   const f = flights.get(hex);
   if (f) f.billboard.color = selected ? PLANE_SELECTED : ICONS[f.klass].color;
@@ -3057,6 +3329,7 @@ function closeFlightPanel() {
   flightPanel.classList.remove("open");
   clearTrail();
   clearRouteDisplay();
+  safe("timelineScrubber", () => clearScrub());
 }
 document.getElementById("fpClose").addEventListener("click", closeFlightPanel);
 
@@ -3067,6 +3340,8 @@ setInterval(() => {
 
 function selectFlight(hex) {
   if (selectedHex && selectedHex !== hex) setSelectedColor(selectedHex, false);
+  // A replay belongs to the flight it was scrubbing, never to the next one.
+  safe("timelineScrubber", () => clearScrub());
   selectedHex = hex;
   setSelectedColor(hex, true);
   const f = flights.get(hex);
