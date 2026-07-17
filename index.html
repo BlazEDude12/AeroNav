@@ -1299,6 +1299,11 @@ let trailPositions = [];             // live segment; grows as new polls arrive
 let trailAlts = [];                  // matching altitudes (ft) per position
 let trailHex = null;
 let trailLastFix = null;             // {lat, lon} of the live segment's tail
+/* Raw fixes for the selected flight, kept in time order: [{t,lat,lon,altFt}].
+ * showTrail used to throw these away once they were baked into Cartesians,
+ * but the altitude ribbon (#2) and the replay scrubber (#3) both need the
+ * timestamps back — so retain them once here rather than re-querying. */
+let trailHistory = [];
 
 function altitudeColor(altFt) {
   const t = Math.min(Math.max(altFt || 0, 0), 38000) / 38000;
@@ -1355,7 +1360,95 @@ function clearTrail() {
   trailAlts = [];
   trailHex = null;
   trailLastFix = null;
+  trailHistory = [];
+  clearRibbon();
 }
+
+/* ----- Feature #2: altitude ribbon -----
+ * A translucent wall dropped from the flown path to the ground, so altitude
+ * reads as height rather than only as the trail's colour. One Primitive per
+ * rebuild holding a per-segment instance, which Cesium batches into a single
+ * draw call — and one thing to remove on deselect. */
+let ribbonPrimitive = null;
+const RIBBON_MAX_SEGMENTS = 220;   // caps the wall on a long, dense history
+
+function clearRibbon() {
+  if (ribbonPrimitive) {
+    // primitives.remove() destroys by default — that's the GPU buffers freed,
+    // not just the reference dropped.
+    viewer.scene.primitives.remove(ribbonPrimitive);
+    ribbonPrimitive = null;
+  }
+}
+
+/* Split the raw fixes into contiguous runs using the same rule as the trail,
+ * so the wall breaks across a coverage hole instead of ruling a false straight
+ * chord over it. Gaps are found on the RAW spacing, before any downsampling —
+ * downsampled points are legitimately far apart at cruise, and testing the
+ * gap after sampling would tear the wall apart mid-flight. */
+function historyRuns(hist) {
+  const runs = [];
+  let cur = [];
+  for (let i = 0; i < hist.length; i++) {
+    const p = hist[i], q = hist[i - 1];
+    if (q && (p.t - q.t > TRAIL_GAP_MS || gcKm(q.lat, q.lon, p.lat, p.lon) > TRAIL_JUMP_KM)) {
+      if (cur.length > 1) runs.push(cur);
+      cur = [];
+    }
+    cur.push(p);
+  }
+  if (cur.length > 1) runs.push(cur);
+  return runs;
+}
+
+function ribbonInstances(run, step) {
+  const out = [];
+  for (let i = 0; i + step < run.length; i += step) {
+    const a = run[i], b = run[i + step];
+    if (a.lat === b.lat && a.lon === b.lon) continue;  // zero-length span
+    const geometry = Cesium.WallGeometry.createGeometry(new Cesium.WallGeometry({
+      positions: [
+        Cesium.Cartesian3.fromDegrees(a.lon, a.lat, a.altFt * FT_TO_M),
+        Cesium.Cartesian3.fromDegrees(b.lon, b.lat, b.altFt * FT_TO_M)
+      ],
+      vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT
+    }));
+    if (!geometry) continue;                           // degenerate — Cesium said no
+    out.push(new Cesium.GeometryInstance({
+      geometry,
+      attributes: {
+        color: Cesium.ColorGeometryInstanceAttribute.fromColor(
+          altitudeColor((a.altFt + b.altFt) / 2).withAlpha(0.22))
+      }
+    }));
+  }
+  return out;
+}
+
+function rebuildRibbon() {
+  clearRibbon();
+  if (!featureOn("altitudeRibbon") || perfModeOn()) return;
+  safe("altitudeRibbon", () => {
+    if (trailHistory.length < 2) return;              // no history: draw nothing
+    const runs = historyRuns(trailHistory);
+    if (!runs.length) return;
+    // Bound the instance count across the whole wall, not per run.
+    const total = runs.reduce((n, r) => n + r.length, 0);
+    const step = Math.max(1, Math.ceil(total / RIBBON_MAX_SEGMENTS));
+    const instances = runs.flatMap((r) => ribbonInstances(r, step));
+    if (!instances.length) return;
+    ribbonPrimitive = viewer.scene.primitives.add(new Cesium.Primitive({
+      geometryInstances: instances,
+      appearance: new Cesium.PerInstanceColorAppearance({
+        translucent: true, flat: true, closed: false
+      }),
+      asynchronous: false
+    }));
+  });
+}
+
+onFeatureFail("altitudeRibbon", clearRibbon);
+onPerfModeChange(() => { if (perfModeOn()) clearRibbon(); else if (trailHex) rebuildRibbon(); });
 
 function rebuildLiveTrail() {
   if (livePrimitive) viewer.scene.primitives.remove(livePrimitive);
@@ -1383,6 +1476,13 @@ async function showTrail(hex) {
   }
   if (trailHex !== hex) return; // selection changed while loading
 
+  // Keep the raw fixes: the ribbon and the replay scrubber both need the
+  // timestamps that the Cartesian conversion below throws away.
+  trailHistory = history
+    .filter((p) => typeof p.lat === "number" && typeof p.lon === "number")
+    .map((p) => ({ t: Date.parse(p.ts), lat: p.lat, lon: p.lon, altFt: p.alt_ft || 0 }))
+    .filter((p) => Number.isFinite(p.t));
+
   // Static segments for history, split at long gaps; the last segment
   // becomes the live one and keeps growing while the plane is selected.
   let seg = [], alts = [];
@@ -1403,6 +1503,7 @@ async function showTrail(hex) {
   trailAlts = alts;
   trailLastFix = seg.length ? { lat: prevLat, lon: prevLon } : null;
   rebuildLiveTrail();
+  rebuildRibbon();
 }
 
 function extendTrail(ac) {
@@ -1421,6 +1522,20 @@ function extendTrail(ac) {
   );
   trailAlts.push(typeof ac.alt_baro === "number" ? ac.alt_baro : 0);
   rebuildLiveTrail();
+
+  // Feed the same fix to the raw history the ribbon and scrubber read, so the
+  // wall trails the aircraft instead of stopping where the stored history did.
+  // Bounded to the same ~1 h window the query asks for, so a long watch can't
+  // grow it without limit.
+  trailHistory.push({
+    t: Date.now(), lat: ac.lat, lon: ac.lon,
+    altFt: typeof ac.alt_baro === "number" ? ac.alt_baro : 0
+  });
+  const cutoff = Date.now() - 3600 * 1000;
+  let drop = 0;
+  while (drop < trailHistory.length && trailHistory[drop].t < cutoff) drop++;
+  if (drop) trailHistory.splice(0, drop);
+  rebuildRibbon();
 }
 
 /* ----- Departure/arrival route (FR24-style strip under the photo) -----
