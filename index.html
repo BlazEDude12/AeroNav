@@ -546,6 +546,89 @@
     body.scrubbing .panel{max-height:calc(100vh - 196px);}
   }
 
+  /* ---------- Feature #7: airport flip-board ---------- */
+  .flip{
+    position:absolute;inset:0;z-index:38;
+    display:flex;align-items:center;justify-content:center;padding:5vh 16px;
+    background:rgba(4,6,12,.42);
+    backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+    opacity:0;visibility:hidden;pointer-events:none;
+    transition:opacity .2s ease,visibility 0s linear .2s;
+  }
+  .flip.open{opacity:1;visibility:visible;pointer-events:auto;transition:opacity .2s ease,visibility 0s;}
+  .flip-box{
+    width:min(640px,94vw);max-height:82vh;display:flex;flex-direction:column;overflow:hidden;
+    --glass-radius:16px;
+    transform:translateY(-8px) scale(.99);transition:transform .22s cubic-bezier(.16,1,.3,1);
+  }
+  .flip.open .flip-box{transform:none;}
+  .flip-head{
+    display:flex;align-items:center;gap:12px;padding:13px 14px;flex:none;
+    border-bottom:1px solid rgba(255,255,255,.08);
+  }
+  .flip-code{font-size:20px;font-weight:700;letter-spacing:.05em;flex:none;}
+  .flip-name{font-size:11px;color:var(--muted);flex:1;min-width:0;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .flip-tabs{display:flex;gap:2px;flex:none;padding:3px;border-radius:10px;
+    background:rgba(255,255,255,.05);}
+  .flip-tabs button{
+    border:none;background:none;cursor:pointer;color:var(--muted);font:inherit;
+    font-size:9.5px;font-weight:700;letter-spacing:.13em;padding:5px 9px;border-radius:7px;
+    transition:color .18s,background .18s;
+  }
+  .flip-tabs button:hover{color:var(--text);}
+  .flip-tabs button[aria-selected="true"]{color:var(--text);background:rgba(255,255,255,.10);}
+  .flip-close{border:none;background:none;cursor:pointer;color:var(--muted);
+    font-size:14px;padding:2px 4px;flex:none;}
+  .flip-close:hover{color:var(--text);}
+  .flip-rows{flex:1;min-height:0;overflow-y:auto;
+    scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.14) transparent;}
+  .flip-rows::-webkit-scrollbar{width:5px;}
+  .flip-rows::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:99px;}
+  .flip-colhead,.flip-row{
+    display:grid;grid-template-columns:106px 1fr 92px;gap:10px;align-items:center;
+    padding:9px 14px;
+  }
+  .flip-colhead{
+    font-size:8.5px;letter-spacing:.2em;color:var(--muted);
+    border-bottom:1px solid rgba(255,255,255,.07);position:sticky;top:0;
+    background:rgba(var(--glass-scrim),.86);backdrop-filter:blur(6px);z-index:1;
+  }
+  .flip-row{border-bottom:1px solid rgba(255,255,255,.05);font-size:13px;cursor:pointer;
+    background:none;border-left:none;border-right:none;border-top:none;color:var(--text);
+    text-align:left;width:100%;font-family:inherit;}
+  .flip-row:hover{background:rgba(60,85,130,.30);}
+  .flip-row:last-child{border-bottom:none;}
+  /* Split-flap: the character face drops into place, staggered along the word */
+  .flip-cs,.flip-port{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-weight:700;letter-spacing:.08em;
+  }
+  .flip-ch{
+    display:inline-block;transform-origin:50% 0;
+    animation:flapIn .26s cubic-bezier(.2,.8,.3,1.2) backwards;
+  }
+  @keyframes flapIn{
+    from{transform:rotateX(-88deg);opacity:0;}
+    to{transform:rotateX(0);opacity:1;}
+  }
+  .flip-sub{font-size:10.5px;color:var(--muted);letter-spacing:.02em;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .flip-status{font-size:10px;font-weight:700;letter-spacing:.1em;text-align:right;}
+  .flip-empty{padding:26px 16px;text-align:center;font-size:12px;color:var(--muted);line-height:1.6;}
+  .flip-loading{padding:22px 16px;text-align:center;font-size:11px;color:var(--muted);letter-spacing:.1em;}
+  /* Split-flap is decoration; reduced motion gets the board with no theatre. */
+  @media (prefers-reduced-motion: reduce){
+    .flip-ch{animation:none;}
+    .flip-box,.flip.open .flip-box{transform:none;}
+  }
+  body.perf .flip-ch{animation:none;}
+  @media (max-width:600px){
+    .flip-colhead,.flip-row{grid-template-columns:88px 1fr 68px;gap:7px;padding:9px 10px;}
+    .flip-head{flex-wrap:wrap;}
+    .flip-name{order:3;flex-basis:100%;}
+  }
+
   /* ---------- Feature #6: command palette ---------- */
   .cmdk{
     position:absolute;inset:0;z-index:40;
@@ -1035,6 +1118,22 @@
     <a id="mfAuthLink">Sign in</a>
   </div>
   <div class="mf-list" id="mfList"></div>
+</div>
+
+<!-- Airport flip-board (Feature #7) -->
+<div class="flip" id="flipBoard" role="dialog" aria-modal="true" aria-label="Airport board" hidden>
+  <div class="flip-box glass glass--liquid">
+    <div class="flip-head">
+      <span class="flip-code" id="flipCode">—</span>
+      <span class="flip-name" id="flipName"></span>
+      <div class="flip-tabs" role="tablist">
+        <button role="tab" data-tab="dep" aria-selected="true">DEPARTURES</button>
+        <button role="tab" data-tab="arr" aria-selected="false">ARRIVALS</button>
+      </div>
+      <button class="flip-close" id="flipClose" aria-label="Close board">✕</button>
+    </div>
+    <div class="flip-rows" id="flipRows"></div>
+  </div>
 </div>
 
 <!-- Replay scrubber (Feature #3) -->
@@ -2077,8 +2176,12 @@ function routeNote(text) {
   fpRoute.style.display = "block";
 }
 
-async function lookupRoute(callsign, lat, lng) {
-  const body = JSON.stringify({ planes: [{ callsign, lat, lng }] });
+/* The routeset APIs take a LIST of planes per request, so a board full of
+ * aircraft costs one round trip rather than one per row. lookupRoute is the
+ * single-plane case of the same call — one code path, one set of fallbacks. */
+async function lookupRoutes(planes) {
+  if (!planes.length) return [];
+  const body = JSON.stringify({ planes });
   const tried = new Set();
   for (const ep of ROUTE_ENDPOINTS) {
     const abs = new URL(ep, location.href).href; // same-origin /routes can duplicate the Worker URL
@@ -2092,12 +2195,20 @@ async function lookupRoute(callsign, lat, lng) {
       });
       if (!res.ok) continue;
       const arr = await res.json();
-      if (Array.isArray(arr) && arr[0] && Array.isArray(arr[0]._airports)) {
-        return { airports: arr[0]._airports, plausible: arr[0].plausible !== false };
-      }
+      // An array with no _airports anywhere means this endpoint knows nothing
+      // useful — fall through to the next, as the single lookup always did.
+      if (Array.isArray(arr) && arr.some((e) => e && Array.isArray(e._airports))) return arr;
     } catch (e) { /* endpoint down — try the next one */ }
   }
   return null;
+}
+
+async function lookupRoute(callsign, lat, lng) {
+  const arr = await lookupRoutes([{ callsign, lat, lng }]);
+  const r = arr && arr[0];
+  return (r && Array.isArray(r._airports))
+    ? { airports: r._airports, plausible: r.plausible !== false }
+    : null;
 }
 
 async function showRoute(hex) {
@@ -2752,6 +2863,7 @@ async function pollFlights(retry) {
     flights.size ? `Global Navigation · ${flights.size} live` : "Global Navigation";
   // Rides the existing refresh — the density layer never polls for itself.
   if (densityOn) drawDensity();
+  window.dispatchEvent(new Event("aeronav:poll"));
   if (selectedHex && flights.has(selectedHex)) updateFlightPanel(flights.get(selectedHex).data);
   if (mfPanel.classList.contains("open")) renderMyFlights();
 }
@@ -2768,6 +2880,178 @@ scene.preRender.addEventListener(() => {
     f.billboard.rotation = heading - Cesium.Math.toRadians(hdg);
   });
 });
+
+/* ----- Feature #7: airport flip-board -----
+ * Which aircraft belong to an airport is decided entirely client-side from the
+ * in-memory feed: everything inside FLIP_RADIUS_KM. ADS-B doesn't broadcast a
+ * flight plan, so the dep/dest pairing comes from the same routeset endpoint
+ * showRoute already uses — but batched into ONE request for the whole board,
+ * and memoised in the same routeCache, so a second look costs nothing. */
+const FLIP_RADIUS_KM = 220;   // roughly the terminal area around a big field
+const FLIP_MAX_ROWS = 40;
+const flipEl = document.getElementById("flipBoard");
+const flipRows = document.getElementById("flipRows");
+let flipAirport = null;       // [iata, icao, name, city, lat, lon]
+let flipTab = "dep";
+let flipSeq = 0;
+
+function flipOpen() { return flipEl.classList.contains("open"); }
+
+function closeFlipBoard() {
+  if (!flipEl || !flipOpen()) return;
+  flipSeq++;                       // abandon any in-flight lookup
+  flipEl.classList.remove("open");
+  flipEl.hidden = true;
+  flipAirport = null;
+  flipRows.innerHTML = "";
+}
+
+function flipChars(text) {
+  // Each glyph gets its own staggered drop, like a real split-flap board.
+  return [...String(text)].map((ch, i) =>
+    `<span class="flip-ch" style="animation-delay:${(i * 45)}ms">${ch === " " ? "&nbsp;" : ch}</span>`
+  ).join("");
+}
+
+// Does this route airport refer to the board's airport?
+function sameAirport(ap, a) {
+  if (!ap) return false;
+  const iata = (ap.iata || "").toUpperCase(), icao = (ap.icao || "").toUpperCase();
+  return (iata && iata === a[0]) || (icao && icao === a[1]);
+}
+
+function renderFlipRows(rows) {
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  if (!rows.length) {
+    flipRows.innerHTML =
+      `<div class="flip-empty">No ${flipTab === "dep" ? "departures" : "arrivals"} in view.<br>` +
+      "Only aircraft currently transmitting near this airport appear here — " +
+      "the board fills up as traffic moves.</div>";
+    return;
+  }
+  const headOther = flipTab === "dep" ? "TO" : "FROM";
+  let html = `<div class="flip-colhead"><span>FLIGHT</span><span>${headOther}</span><span style="text-align:right">STATUS</span></div>`;
+  for (const r of rows) {
+    html +=
+      `<button class="flip-row" data-hex="${esc(r.hex)}">` +
+        `<span class="flip-cs">${flipChars(esc(r.cs))}</span>` +
+        `<span><span class="flip-port">${flipChars(esc(r.port))}</span>` +
+          `<span class="flip-sub"> ${esc(r.sub)}</span></span>` +
+        `<span class="flip-status" style="color:${esc(r.color || "#7c8aa0")}">${esc(r.status)}</span>` +
+      "</button>";
+  }
+  flipRows.innerHTML = html;
+}
+
+/* Build the board for `a`. The filter is client-side; only the dep/dest
+ * pairing needs the network, and only once per set of callsigns. */
+async function buildFlipBoard() {
+  const a = flipAirport;
+  if (!a) return;
+  const seq = ++flipSeq;
+
+  // 1. Client-side: everything in memory near this airport.
+  const near = [];
+  for (const [hex, f] of flights) {
+    if (!f.data || typeof f.data.lat !== "number") continue;
+    const cs = (f.data.flight || "").trim();
+    if (!cs) continue;                       // a board row needs a flight number
+    if (gcKm(a[4], a[5], f.data.lat, f.data.lon) > FLIP_RADIUS_KM) continue;
+    near.push({ hex, cs, f });
+  }
+  if (!near.length) { renderFlipRows([]); return; }
+
+  // 2. Fill routeCache for any callsign we haven't already resolved — one
+  //    batched request for the whole board rather than one per row.
+  const unknown = near.filter((n) => routeCache.get(n.cs) === undefined);
+  if (unknown.length) {
+    flipRows.innerHTML = '<div class="flip-loading">READING THE BOARD…</div>';
+    const arr = await lookupRoutes(unknown.slice(0, FLIP_MAX_ROWS * 2).map((n) => ({
+      callsign: n.cs, lat: n.f.data.lat, lng: n.f.data.lon
+    })));
+    if (seq !== flipSeq) return;             // closed or switched airport while loading
+    // Cache every answer, including the misses, so we don't ask again.
+    const byCs = new Map();
+    for (const e of arr || []) if (e && e.callsign) byCs.set(String(e.callsign).trim(), e);
+    for (const n of unknown) {
+      const e = byCs.get(n.cs);
+      routeCache.set(n.cs, (e && Array.isArray(e._airports) && e._airports.length >= 2)
+        ? { airports: e._airports, plausible: e.plausible !== false }
+        : null);
+    }
+  }
+  if (seq !== flipSeq) return;
+
+  // 3. Split into departures and arrivals by which end of the leg matches.
+  const rows = [];
+  for (const n of near) {
+    const route = routeCache.get(n.cs);
+    if (!route || !route.airports || route.airports.length < 2) continue;
+    const [dep, dest] = currentLeg(route.airports, n.f.data);
+    if (!dep || !dest) continue;
+    const isDep = sameAirport(dep, a), isArr = sameAirport(dest, a);
+    if (flipTab === "dep" ? !isDep : !isArr) continue;
+    const other = flipTab === "dep" ? dest : dep;
+    const [status, color] = flightMode(n.f.data);
+    rows.push({
+      hex: n.hex, cs: n.cs,
+      port: (other.iata || other.icao || "???").toUpperCase(),
+      sub: (other.location || other.name || "").split(",")[0],
+      status: String(status).toUpperCase(), color
+    });
+  }
+  rows.sort((x, y) => x.cs.localeCompare(y.cs));
+  renderFlipRows(rows.slice(0, FLIP_MAX_ROWS));
+}
+
+function openFlipBoard(a) {
+  safe("flipBoard", () => {
+    flipAirport = a;
+    flipTab = "dep";
+    flipEl.hidden = false;
+    void flipEl.offsetWidth;                 // flush `hidden` so the transition runs
+    flipEl.classList.add("open");
+    document.getElementById("flipCode").textContent = a[0];
+    document.getElementById("flipName").textContent = [a[2], a[3]].filter(Boolean).join(" · ");
+    flipEl.querySelectorAll(".flip-tabs button").forEach((b) =>
+      b.setAttribute("aria-selected", String(b.dataset.tab === "dep")));
+    flipRows.innerHTML = '<div class="flip-loading">READING THE BOARD…</div>';
+    buildFlipBoard();
+  });
+}
+
+onFeatureFail("flipBoard", () => { closeFlipBoard(); flipEl.hidden = true; });
+
+if (featureOn("flipBoard")) {
+  document.getElementById("flipClose").addEventListener("click", closeFlipBoard);
+  flipEl.addEventListener("mousedown", (e) => { if (e.target === flipEl) closeFlipBoard(); });
+  flipEl.querySelectorAll(".flip-tabs button").forEach((b) => {
+    b.addEventListener("click", () => safe("flipBoard", () => {
+      flipTab = b.dataset.tab;
+      flipEl.querySelectorAll(".flip-tabs button").forEach((x) =>
+        x.setAttribute("aria-selected", String(x === b)));
+      buildFlipBoard();
+    }));
+  });
+  flipRows.addEventListener("click", (e) => {
+    const row = e.target.closest(".flip-row");
+    if (!row) return;
+    const hex = row.dataset.hex;
+    closeFlipBoard();
+    if (flights.has(hex)) {
+      selectFlight(hex);
+      const f = flights.get(hex);
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(
+          f.data.lon, f.data.lat, Math.max(flightAltitudeMeters(f.data) * 2, 120000)),
+        duration: 1.4
+      });
+    }
+  });
+  window.addEventListener("keydown", (e) => { if (e.key === "Escape" && flipOpen()) closeFlipBoard(); });
+  // The board reads the same in-memory set the globe does; keep it current.
+  window.addEventListener("aeronav:poll", () => { if (flipOpen()) buildFlipBoard(); });
+}
 
 /* ----- Feature #9: live density layer -----
  * A heat overlay built from the aircraft already in memory — the same set the
@@ -4080,6 +4364,7 @@ function runSearchAction(el) {
       viewer.camera.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(a[5], a[4], 18000), duration: 1.6 });
       showAirportWx(a); // live METAR card for the selected airport
+      if (featureOn("flipBoard")) openFlipBoard(a);
     }
   } else if (act === "route") {
     const a = AIRPORTS.find(x => x[0] === el.dataset.a);
