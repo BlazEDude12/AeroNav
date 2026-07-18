@@ -2299,18 +2299,35 @@ function currentLeg(airports, ac) {
   return best || [pts[0], pts[pts.length - 1]];
 }
 
+/* A realistic cruise ground speed (knots) for the aircraft's class. ETAs are
+ * built on this floor, not the raw ground speed: a jet just off the runway is
+ * doing 180 kt in the climb, and dividing a whole cross-country leg by that
+ * reads as a 15-hour flight. Real cruise speed dominates the leg, so estimate
+ * from it and let the readout tighten as the actual speed overtakes the floor
+ * at altitude. (No filed flight plan is available, so this stands in for it.) */
+function cruiseFloorKt(ac) {
+  const k = classifyAircraft(ac);
+  // Slowest cruise you'd expect for the class, so the floor only rescues the
+  // climb (where gs undershoots cruise) and never overstates a slow aircraft.
+  if (k === "heli") return 110;
+  if (k === "small") return 140;
+  return 450;   // jets and widebodies
+}
+
 /* How far along its leg an aircraft is. Single source of truth: the detail
  * panel and the My Flights shelf both read through here, so the ring and the
  * bar can't disagree about the same flight.
- * `mins` is null when the aircraft is too slow or too close to estimate. */
+ * `mins` is null when the aircraft is too slow or too close to estimate;
+ * `estKt` is the cruise-floored speed both the ETA and the elapsed clock use. */
 function legProgress(ac, dep, dest) {
   const covered = gcKm(dep.lat, dep.lon, ac.lat, ac.lon);
   const left = gcKm(ac.lat, ac.lon, dest.lat, dest.lon);
   const total = covered + left;
   const pct = total > 0 ? Math.min(Math.max(covered / total * 100, 0), 100) : 0;
   const gs = typeof ac.gs === "number" ? ac.gs : 0;
-  const mins = (gs > 80 && left > 5) ? Math.round(left / (gs * 1.852) * 60) : null;
-  return { covered, left, pct, mins, gs };
+  const estKt = Math.max(gs, cruiseFloorKt(ac));
+  const mins = (gs > 80 && left > 5) ? Math.round(left / (estKt * 1.852) * 60) : null;
+  return { covered, left, pct, mins, gs, estKt };
 }
 
 function updateRouteProgress(ac) {
@@ -2318,7 +2335,7 @@ function updateRouteProgress(ac) {
   const el = document.getElementById("rpFill");
   if (!el) return;
   const { dep, dest } = routeEnds;
-  const { covered, left, pct, mins, gs } = legProgress(ac, dep, dest);
+  const { covered, left, pct, mins, estKt } = legProgress(ac, dep, dest);
   el.style.width = pct + "%";
   document.getElementById("rpPlane").style.left = pct + "%";
   document.getElementById("rpCovered").textContent = Math.round(covered).toLocaleString() + " km";
@@ -2330,9 +2347,9 @@ function updateRouteProgress(ac) {
     eta.innerHTML = `Landing in <b>${h ? h + " h " : ""}${m} min</b> ` +
       '<span style="opacity:.65">(estimated)</span>';
     // Clock times in each airport's local timezone. Departure is derived
-    // from distance covered at a cruise-ish speed, so it's approximate.
+    // from distance covered at the same cruise-floored speed, so it's approximate.
     const arrDate = new Date(Date.now() + mins * 60000);
-    const depDate = new Date(Date.now() - covered / (Math.max(gs, 300) * 1.852) * 3600000);
+    const depDate = new Date(Date.now() - covered / (estKt * 1.852) * 3600000);
     depT.textContent = "≈ " + fmtInZone(depDate, routeEnds.depTz);
     document.getElementById("rpDepTz").textContent = tzLabel(routeEnds.depTz);
     document.getElementById("rpArrT").textContent = "≈ " + fmtInZone(arrDate, routeEnds.destTz);
@@ -3941,7 +3958,7 @@ function routeBarInfo() {
   const lp = legProgress(rec.data, dep, dest);
   const totalKm = lp.covered + lp.left;
   if (!(totalKm > 0)) return null;
-  const speedKmh = Math.max(lp.gs, 300) * 1.852;   // same floor the panel uses
+  const speedKmh = lp.estKt * 1.852;   // cruise-floored, same as the ETA
   return {
     dep, dest, totalKm,
     frac: lp.pct / 100,
