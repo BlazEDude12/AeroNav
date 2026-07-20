@@ -377,6 +377,8 @@
   /* ---------- Favorites / auth ---------- */
   .panel-head .actions{display:flex;gap:2px;}
   #fpStar.active{color:#ffd76a;}
+  #fp3d{font-size:10px;font-weight:800;letter-spacing:.05em;}
+  #fp3d.active{color:var(--accent);text-shadow:0 0 10px rgba(76,195,255,.6);}
   .mf-toggle{
     position:absolute;top:20px;right:20px;z-index:10;cursor:pointer;
     display:flex;align-items:center;gap:7px;padding:10px 14px;--glass-radius:12px;
@@ -1209,6 +1211,10 @@
           title="Show where the live traffic is concentrated">
     <span class="dens-dot" aria-hidden="true"></span><span class="dens-label">DENSITY</span>
   </button>
+  <button class="dens-toggle glass" id="wxToggle" aria-pressed="false"
+          title="Live clouds and precipitation radar">
+    <span class="dens-dot" aria-hidden="true"></span><span class="dens-label">WEATHER</span>
+  </button>
 </div>
 <div class="search-results glass" id="searchResults"></div>
 
@@ -1230,6 +1236,7 @@
       </div>
     </div>
     <div class="actions">
+      <button id="fp3d" aria-label="3D chase view" aria-pressed="false" title="3D chase view">3D</button>
       <button id="fpExpand" aria-label="Expand aircraft details" aria-expanded="false" title="Expand details">⤢</button>
       <button id="fpStar" aria-label="Save to My Flights" title="Save to My Flights">☆</button>
       <button id="fpClose" aria-label="Close flight details">✕</button>
@@ -3098,18 +3105,617 @@ async function pollFlights(retry) {
   if (mfPanel.classList.contains("open")) renderMyFlights();
 }
 
+/* Billboard rotation that survives a tilted camera. `cameraHeading − track`
+ * is only right looking straight down: tilt the view and "north on screen"
+ * varies across the scene, so every glyph points somewhere wrong. Instead,
+ * build the aircraft's direction of motion in world space (east/north at its
+ * own position) and rotate it into view space — the glyph then points along
+ * the direction the plane actually moves on screen, under any heading/tilt.
+ * Scratch vectors are module-level: this runs per plane per frame. */
+const _rUp = new Cesium.Cartesian3(), _rEast = new Cesium.Cartesian3(),
+  _rNorth = new Cesium.Cartesian3(), _rDir = new Cesium.Cartesian3(),
+  _rView = new Cesium.Cartesian3(), _rPos = new Cesium.Cartesian3();
+/* Foreshortening from the last screenRotation call: how much of the motion is
+ * across the view (1 = broadside, 0 = dead toward/away from the camera).
+ * Squashing the glyph's fuselage axis by this is what makes a plane flying
+ * away read as "receding toward the horizon" — full wingspan, compressed
+ * body, like a real aircraft seen from behind — rather than as a flat
+ * top-view silhouette apparently climbing into space. */
+let _rSquash = 1;
+function screenRotation(position, trackDeg) {
+  _rSquash = 1;
+  const t = Cesium.Math.toRadians(trackDeg);
+  Cesium.Cartesian3.normalize(position, _rUp);
+  Cesium.Cartesian3.cross(Cesium.Cartesian3.UNIT_Z, _rUp, _rEast);
+  const m = Cesium.Cartesian3.magnitude(_rEast);
+  if (m < 1e-6) return viewer.camera.heading - t;      // at a pole: old formula
+  Cesium.Cartesian3.divideByScalar(_rEast, m, _rEast);
+  Cesium.Cartesian3.cross(_rUp, _rEast, _rNorth);
+  Cesium.Cartesian3.multiplyByScalar(_rNorth, Math.cos(t), _rDir);
+  Cesium.Cartesian3.multiplyByScalar(_rEast, Math.sin(t), _rEast);
+  Cesium.Cartesian3.add(_rDir, _rEast, _rDir);
+  const view = viewer.camera.viewMatrix;
+  Cesium.Matrix4.multiplyByPoint(view, position, _rPos);
+  Cesium.Matrix4.multiplyByPointAsVector(view, _rDir, _rView);
+  _rSquash = Math.min(1, Math.hypot(_rView.x, _rView.y));  // _rDir is unit length
+  // Screen direction is the derivative of the perspective projection at this
+  // point — the rotated direction alone is only right at screen centre; the
+  // divide by depth bends it everywhere else: d(x/w)/du ∝ e·w + p·e_z. No
+  // projection-matrix scaling: its unequal x/y factors are exactly cancelled
+  // by the NDC→viewport mapping, so in pixel space both axes share one scale.
+  const w = -_rPos.z;                                  // positive depth ahead of the camera
+  if (w < 1e-6) return viewer.camera.heading - t;      // behind the camera: not drawn anyway
+  const dx = _rView.x * w + _rPos.x * _rView.z;
+  const dy = _rView.y * w + _rPos.y * _rView.z;
+  // atan2(dx, dy) is the clockwise-from-up screen angle; billboard rotation
+  // is counter-clockwise, so negate. A direction seen dead end-on has no
+  // screen angle — keep the heading formula there.
+  if (Math.abs(dx) + Math.abs(dy) < 1e-12) return viewer.camera.heading - t;
+  return -Math.atan2(dx, dy);
+}
+
 // Smooth motion between polls: advance every frame along track at ground speed
 scene.preRender.addEventListener(() => {
   if (!flights.size) return;
   const now = Date.now();
-  const heading = viewer.camera.heading;
   flights.forEach((f) => {
     if (!f.data) return;
     const hdg = planeHeading(f);
     f.billboard.position = flightPosition(f.data, (now - f.fetchedAt) / 1000, hdg);
-    f.billboard.rotation = heading - Cesium.Math.toRadians(hdg);
+    f.billboard.rotation = screenRotation(f.billboard.position, hdg);
+    // Foreshorten the fuselage axis by how end-on the motion is (floor keeps
+    // the glyph clickable when flying dead away). Top-down views squash ~0.
+    f.billboard.height = ICONS[f.klass].size * Math.max(_rSquash, 0.42);
   });
+  // The replay/preview ghost sits outside the flights map but must obey the
+  // same camera — otherwise it's the one plane left pointing oddly.
+  if (ghostBb && ghostBb.show && scrubAc && typeof scrubAc.track === "number") {
+    ghostBb.rotation = screenRotation(ghostBb.position, scrubAc.track);
+    ghostBb.height = ghostBb.width * Math.max(_rSquash, 0.42);
+  }
+  update3DModel();
 });
+
+/* ----- 3D aircraft on selection (FR24-style) --------------------------
+ * The selected plane swaps its flat glyph for a real 3D model when the
+ * camera is close (or the chase view is on). There is no model library to
+ * lean on, so the airframes are generated in code: one low-poly GLB per
+ * icon class, so a 747 gets four engines, an A380 the full double-deck
+ * fuselage, a Cessna a high straight wing and prop. Same silhouettes the
+ * icons already promise, now with depth. */
+const MODEL_SHOW_RANGE_M = 30000;   // beyond this the model is subpixel — keep the glyph
+const MODEL_LENGTHS = { jet: 38, wide: 63, quad: 68, a380: 71, small: 8, heli: 12 };
+
+/* Brand colours per IATA code, [tail/primary, accent/secondary]. The logo
+ * CDN (gstatic) sends no CORS headers, so its pixels can't be sampled or
+ * painted onto a texture — a curated table is what "the airline's colours"
+ * can actually mean here. Unlisted airlines fly a clean generic livery. */
+const AIRLINE_LIVERY = {
+  AA:["#C4122F","#1F63A8"], UA:["#0033A0","#69B3E7"], DL:["#C8102E","#003268"],
+  WN:["#304CB2","#F9B612"], AS:["#01426A","#44C8F5"], B6:["#003876","#6EC5E9"],
+  F9:["#046A38","#8DC63F"], NK:["#FFE300","#231F20"], HA:["#9B2588","#E25373"],
+  AC:["#F01428","#1E1E1E"], WS:["#0F8BBD","#003C71"], BA:["#075AAA","#EB2226"],
+  LH:["#05164D","#FFAD00"], AF:["#002157","#ED2939"], KL:["#00A1E4","#002F6C"],
+  EK:["#D71921","#C8A560"], QR:["#5C0632","#8A8D8F"], EY:["#C99700","#4A4A48"],
+  TK:["#E81932","#002B45"], QF:["#E40000","#7C878E"], NZ:["#1E1E1E","#00B0B9"],
+  SQ:["#002663","#FCB130"], CX:["#006564","#6E6259"], JL:["#C00000","#4A4A4A"],
+  NH:["#003399","#4CA3DD"], KE:["#7BB1DB","#C8102E"], OZ:["#C41E3A","#6E6E6E"],
+  CI:["#CE0E2D","#003E7E"], BR:["#00563F","#FF8200"], CA:["#E10600","#C8A560"],
+  MU:["#1A2F6B","#C8102E"], CZ:["#0072CE","#C8102E"], IB:["#D7192D","#F6A800"],
+  AY:["#002F6C","#9FC9EB"], SK:["#003D85","#B9BCC3"], LX:["#D52B1E","#1E1E1E"],
+  OS:["#D81E05","#9BA2AA"], EI:["#008C45","#B3D57D"], VS:["#E10D0D","#5B2C86"],
+  FR:["#073590","#F1C933"], U2:["#FF6600","#4A4A4A"], W6:["#C6007E","#06038D"],
+  AI:["#C8102E","#FF9933"], "6E":["#001B94","#8A9BD4"], SV:["#006341","#B5A268"],
+  MS:["#003580","#C09B51"], ET:["#078930","#FCDD09"], LA:["#1B0088","#ED1650"],
+  AM:["#0B2343","#E4002B"], AV:["#D6001C","#1A1A1A"], CM:["#00457C","#C8102E"],
+  G3:["#F26722","#B0B7BF"], "5X":["#351C15","#FFB500"], FX:["#4D148C","#FF6600"],
+};
+const LIVERY_DEFAULT = { primary: "#3d6fa8", secondary: "#22344c" };
+
+/* "United Airlines" → UNITED, "Air France" → AIR FRANCE, "All Nippon
+ * Airways" → ALL NIPPON: the word people paint on the fuselage. */
+function titlesFor(name) {
+  if (!name) return "";
+  const w = name.trim().split(/\s+/);
+  const two = /^(air|all|the)$/i.test(w[0]) && w[1];
+  return (two ? w[0] + " " + w[1] : w[0]).toUpperCase();
+}
+
+function liveryFor(callsign) {
+  const al = airlineFor((callsign || "").trim());
+  const iata = al && al[0];
+  const colors = iata && AIRLINE_LIVERY[iata];
+  return {
+    key: colors ? iata : "gen",
+    primary: colors ? colors[0] : LIVERY_DEFAULT.primary,
+    secondary: colors ? colors[1] : LIVERY_DEFAULT.secondary,
+    title: colors && al ? titlesFor(al[1]) : "",
+  };
+}
+
+function shadeHex(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = (v) => Math.max(0, Math.min(255, v + amt));
+  return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`;
+}
+function hexToRgb01(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
+/* The livery atlas. Layout: fuselage wraps u 0–0.70 (v = angle around the
+ * hull: 0 top, .25 left, .5 belly, .75 right), the fin fills u 0.76–1, and a
+ * white "chip" column at u≈0.73 is what every untextured vertex samples so
+ * its vertex colour passes through unchanged. Titles are painted twice —
+ * the far-side band rotated 180° so it reads nose-first from both sides. */
+function makeLiveryCanvas(primary, secondary, title) {
+  const cv = document.createElement("canvas");
+  cv.width = 1024; cv.height = 512;
+  const g = cv.getContext("2d");
+  // fuselage: warm white with a shaded belly
+  g.fillStyle = "#f4f6f9"; g.fillRect(0, 0, 737, 512);
+  const belly = g.createLinearGradient(0, 200, 0, 312);
+  belly.addColorStop(0, "rgba(146,158,175,0)");
+  belly.addColorStop(.5, "rgba(146,158,175,.5)");
+  belly.addColorStop(1, "rgba(146,158,175,0)");
+  g.fillStyle = belly; g.fillRect(0, 200, 737, 112);
+  // cabin windows: a row of dark portholes along each side
+  g.fillStyle = "#39404e";
+  for (let x = 150; x <= 700; x += 13) {
+    g.beginPath(); g.arc(x, 124, 2.6, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(x, 388, 2.6, 0, Math.PI * 2); g.fill();
+  }
+  // swept windscreen just aft of the nose
+  g.fillStyle = "#1c222d";
+  g.beginPath(); g.moveTo(28, 106); g.lineTo(64, 100); g.lineTo(66, 112); g.lineTo(32, 116); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(28, 406); g.lineTo(64, 412); g.lineTo(66, 400); g.lineTo(32, 396); g.closePath(); g.fill();
+  if (title) {
+    g.fillStyle = primary;
+    g.font = "800 52px system-ui, 'Segoe UI', Arial, sans-serif";
+    const w = Math.min(g.measureText(title).width, 420);
+    g.fillText(title, 96, 108, 420);          // near side, above the window row
+    g.save();                                  // far side reads the other way
+    g.translate(96 + w, 404); g.rotate(Math.PI);
+    g.fillText(title, 0, -16, 420);
+    g.restore();
+  }
+  // fin: brand gradient with a secondary sweep
+  const fg = g.createLinearGradient(768, 0, 1024, 0);
+  fg.addColorStop(0, shadeHex(primary, -28)); fg.addColorStop(1, primary);
+  g.fillStyle = fg; g.fillRect(768, 0, 256, 512);
+  g.fillStyle = secondary;
+  g.beginPath();
+  g.moveTo(768, 430); g.quadraticCurveTo(890, 300, 1024, 330);
+  g.lineTo(1024, 368); g.quadraticCurveTo(890, 340, 768, 472);
+  g.closePath(); g.fill();
+  // the white chip column for untextured (vertex-coloured) geometry
+  g.fillStyle = "#ffffff"; g.fillRect(738, 0, 28, 512);
+  return cv;
+}
+
+function buildAircraftGlb(klass, liveryCanvas, prim) {
+  const P = [], N = [], C = [], T = [], I = [];
+  const PRIM = prim || [0.24, 0.44, 0.66];   // engines/winglets wear the brand colour
+  let vi = 0;
+  const CHIP = [0.735, 0.5];   // white texel: untextured vertex colours pass through
+  // Flat-shaded triangle; `hint` flips the normal outward (the material is
+  // double-sided, so winding only matters for lighting).
+  const tri = (a, b, c, col, hint, uvs) => {
+    const ux = b[0]-a[0], uy = b[1]-a[1], uz = b[2]-a[2];
+    const vx = c[0]-a[0], vy = c[1]-a[1], vz = c[2]-a[2];
+    let nx = uy*vz-uz*vy, ny = uz*vx-ux*vz, nz = ux*vy-uy*vx;
+    const l = Math.hypot(nx, ny, nz) || 1; nx/=l; ny/=l; nz/=l;
+    if (hint && nx*hint[0] + ny*hint[1] + nz*hint[2] < 0) { nx=-nx; ny=-ny; nz=-nz; }
+    // Bake a soft studio key light into the vertex colours and render the
+    // material unlit: the livery then reads identically from every angle and
+    // at night, instead of the sun turning the shadow-side tail dark gray.
+    const sh = 0.70 + 0.30 * Math.max(0, nx*0.30 + ny*0.38 + nz*0.87);
+    [a, b, c].forEach((p, k) => {
+      const uv = uvs ? uvs[k] : CHIP;
+      P.push(p[0], p[1], p[2]); N.push(nx, ny, nz);
+      C.push(col[0]*sh, col[1]*sh, col[2]*sh);
+      T.push(uv[0], uv[1]);
+      I.push(vi++);
+    });
+  };
+  const quad = (a, b, c, d, col, hint, uvs) => {
+    tri(a, b, c, col, hint, uvs && [uvs[0], uvs[1], uvs[2]]);
+    tri(a, c, d, col, hint, uvs && [uvs[0], uvs[2], uvs[3]]);
+  };
+  // Smooth-shaded triangle: per-vertex normals with the same baked light, so
+  // lathed surfaces read as continuous curves instead of a bag of facets.
+  const triS = (q3, col, uvs) => {
+    q3.forEach((q, k) => {
+      const sh = 0.70 + 0.30 * Math.max(0, q.n[0]*0.30 + q.n[1]*0.38 + q.n[2]*0.87);
+      const uv = uvs ? uvs[k] : CHIP;
+      P.push(q.v[0], q.v[1], q.v[2]); N.push(q.n[0], q.n[1], q.n[2]);
+      C.push(col[0]*sh, col[1]*sh, col[2]*sh);
+      T.push(uv[0], uv[1]);
+      I.push(vi++);
+    });
+  };
+  const quadS = (q4, col, uvs) => {
+    triS([q4[0], q4[1], q4[2]], col, uvs && [uvs[0], uvs[1], uvs[2]]);
+    triS([q4[0], q4[2], q4[3]], col, uvs && [uvs[0], uvs[2], uvs[3]]);
+  };
+
+  // Lathe a profile of rings around the X axis: [{x, r, z (centreline lift)}].
+  // Normals are analytic (radial, tilted by the local radius slope) so the
+  // surface shades as one continuous curve. uvFn(x, angleFrac) textures it;
+  // rings carry seg+1 points so the wrap seam maps angleFrac 1.0 rather than
+  // sweeping the atlas backwards.
+  const tube = (prof, col, cy = 0, seg = 14, uvFn = null) => {
+    const n = prof.length;
+    const slope = prof.map((p, k) => {
+      const a = prof[Math.max(0, k-1)], b = prof[Math.min(n-1, k+1)];
+      const dx = b.x - a.x;
+      return dx ? Math.max(-3, Math.min(3, (b.r - a.r) / dx)) : 0;
+    });
+    const ring = (p, s) => {
+      const pts = [], nl = Math.hypot(s, 1);
+      for (let i = 0; i <= seg; i++) {
+        const f = i / seg, a = f * Math.PI * 2;
+        const sy = Math.sin(a), cz = Math.cos(a);
+        pts.push({ v: [p.x, cy + sy*p.r, (p.z||0) + cz*p.r],
+                   n: [-s/nl, sy/nl, cz/nl], f });
+      }
+      return pts;
+    };
+    let prev = ring(prof[0], slope[0]);
+    for (let k = 1; k < n; k++) {
+      const cur = ring(prof[k], slope[k]);
+      for (let i = 0; i < seg; i++) {
+        const vs = [prev[i], prev[i+1], cur[i+1], cur[i]];
+        quadS(vs, col, uvFn && vs.map(q => uvFn(q.v[0], q.f)));
+      }
+      prev = cur;
+    }
+  };
+
+  // Closed 8-corner slab (wings, stabilisers, fins): 0-3 top loop, 4-7 bottom
+  const slab8 = (v, col) => {
+    const cen = [0,1,2].map(k => v.reduce((s,p) => s+p[k], 0) / 8);
+    const face = (a,b,c,d) => {
+      const fc = [0,1,2].map(m => (v[a][m]+v[b][m]+v[c][m]+v[d][m])/4);
+      quad(v[a], v[b], v[c], v[d], col, [fc[0]-cen[0], fc[1]-cen[1], fc[2]-cen[2]]);
+    };
+    face(0,1,2,3); face(7,6,5,4); face(0,4,5,1); face(1,5,6,2); face(2,6,7,3); face(3,7,4,0);
+  };
+
+  const BODY=[.93,.94,.97], WING=[.80,.84,.90], ENG=[.50,.54,.62], FIN=[.24,.52,.80], DARK=[.16,.18,.23];
+
+  // Everything is authored nose-forward along +X with the origin at mid-fuselage.
+  const D = {
+    jet:  { L:38, r:2.0, span:35.8, wingD:15, rootC:5.8, tipC:1.9, sweep:6.5, dihe:1.7, wingZ:-1.1, thick:.42,
+            engs:[[5.8,13.6,4.4,1.05]], hspan:6.4, hrootC:3.4, htipC:1.4, hsweep:2.4, hD:33.5, hZ:.9,
+            finH:6.6, finRootC:5.4, finTipC:2.2, finSweep:4.4, finD:31.5, finZ0:1.5,
+            // 737-ish: short pointed nose, level crown, upswept tail cone
+            prof:[[0,.10,-.10],[.5,.62,-.06],[1.4,1.15,-.02],[2.6,1.62,0],[4.2,1.88,0],[6.5,1.98,0],
+                  [23.5,1.98,0],[28.5,1.62,.3],[32.5,1.05,.75],[35.5,.55,1.15],[38,.08,1.42]] },
+    wide: { L:63, r:2.95, span:60, wingD:24, rootC:9.6, tipC:2.6, sweep:12, dihe:3, wingZ:-1.7, thick:.6,
+            engs:[[8.8,22.2,6.2,1.75]], hspan:10.5, hrootC:5.2, htipC:2, hsweep:4, hD:55.5, hZ:1.1,
+            finH:9.6, finRootC:8, finTipC:3, finSweep:6.5, finD:52, finZ0:2.2,
+            prof:[[0,.12,-.12],[.8,1.0,-.05],[2.2,1.95,0],[4.5,2.6,0],[7.5,2.9,0],[11,2.95,0],
+                  [40,2.95,0],[47,2.6,.3],[53,2.05,.7],[58.5,1.25,1.25],[63,.12,1.75]] },
+    quad: { L:68, r:3.2, span:62, wingD:25, rootC:11, tipC:3, sweep:13, dihe:3.2, wingZ:-1.8, thick:.65,
+            engs:[[9.5,24,5.6,1.5],[17,27.5,5.2,1.4]], hspan:10.8, hrootC:5.6, htipC:2.2, hsweep:4.2, hD:60, hZ:1.2,
+            finH:10.6, finRootC:9, finTipC:3.4, finSweep:7, finD:56, finZ0:2.4,
+            // extra lifted rings up front: the 747 hump
+            prof:[[0,.14,-.1],[1,1.2,0],[2.8,2.3,.05],[5,3,.1],[7.5,3.25,0],[9.5,3.5,.45],[19,3.5,.5],
+                  [24.5,3.2,0],[45,3.2,0],[52,2.7,.4],[58,1.9,.9],[63.5,1,1.45],[68,.12,1.8]] },
+    a380: { L:71, r:4.05, span:78, wingD:26, rootC:13, tipC:3.6, sweep:14, dihe:3, wingZ:-2.4, thick:.75,
+            engs:[[11,25,6.4,1.8],[19.5,29,6,1.7]], hspan:12, hrootC:6.4, htipC:2.6, hsweep:4.6, hD:62.5, hZ:1.4,
+            finH:12.4, finRootC:10.4, finTipC:4, finSweep:8, finD:58, finZ0:3.2,
+            prof:[[0,.15,-.15],[1.2,1.6,-.05],[3,2.9,0],[5.5,3.6,0],[8.5,3.95,0],[12,4.1,0],
+                  [45,4.1,0],[52,3.6,.45],[58,2.8,.95],[64,1.7,1.55],[71,.15,2.1]] },
+    small:{ L:8, r:.8, span:11, wingD:2.1, rootC:1.5, tipC:1.35, sweep:.2, dihe:.35, wingZ:.85, thick:.16,
+            engs:[], hspan:1.7, hrootC:.95, htipC:.6, hsweep:.3, hD:7.1, hZ:.35,
+            finH:1.5, finRootC:1.35, finTipC:.6, finSweep:.7, finD:6.6, finZ0:.55,
+            prof:[[0,.10,0],[.4,.5,0],[1,.75,-.03],[2,.85,0],[3.5,.8,.05],[5,.65,.15],[6.5,.38,.32],[8,.05,.48]] },
+  };
+
+  if (klass === "heli") {
+    // Cabin, tail boom, fin, mast and two crossed rotor blades.
+    const X = (d) => 6 - d;
+    tube([[0,.12,.2],[1,.95,0],[2.6,1.35,0],[4.6,1.3,0],[6.4,.75,.35],[7.4,.4,.6]]
+      .map(([d,r,z]) => ({x:X(d), r, z})), BODY, 0, 20);
+    tube([[7,.34,.8],[12.3,.2,1.05]].map(([d,r,z]) => ({x:X(d), r, z})), WING, 0, 8);
+    slab8([[X(11.6),.08,1.1],[X(12.4),.08,2.5],[X(12.6),.08,2.5],[X(12.2),.08,1.1],
+           [X(11.6),-.08,1.1],[X(12.4),-.08,2.5],[X(12.6),-.08,2.5],[X(12.2),-.08,1.1]], FIN);
+    slab8([[X(3),.14,1.35],[X(3),.14,2.1],[X(3.5),.14,2.1],[X(3.5),.14,1.35],
+           [X(3),-.14,1.35],[X(3),-.14,2.1],[X(3.5),-.14,2.1],[X(3.5),-.14,1.35]], ENG);
+    const bx = X(3.25);
+    slab8([[bx-6.4,.3,2.14],[bx+6.4,.3,2.14],[bx+6.4,.3,2.06],[bx-6.4,.3,2.06],
+           [bx-6.4,-.3,2.14],[bx+6.4,-.3,2.14],[bx+6.4,-.3,2.06],[bx-6.4,-.3,2.06]], DARK);
+    slab8([[bx-.3,6.4,2.14],[bx+.3,6.4,2.14],[bx+.3,6.4,2.06],[bx-.3,6.4,2.06],
+           [bx-.3,-6.4,2.14],[bx+.3,-6.4,2.14],[bx+.3,-6.4,2.06],[bx-.3,-6.4,2.06]], DARK);
+  } else {
+    const d = D[klass] || D.jet;
+    const X = (dist) => d.L/2 - dist;
+    // Painted hull: white vertex colour so the livery texture shows untinted
+    tube(d.prof.map(([dd,r,z]) => ({x:X(dd), r, z})), [1,1,1], 0, 28,
+      (x, f) => [0.02 + (d.L/2 - x)/d.L * 0.68, f]);
+    for (const s of [1, -1]) {
+      // main wing: root at the fuselage wall, tip swept back with dihedral
+      const rootX = X(d.wingD), tipX = rootX - d.sweep;
+      slab8([[rootX, s*d.r*.55, d.wingZ+d.thick/2],[tipX, s*d.span/2, d.wingZ+d.dihe+d.thick*.2],
+             [tipX-d.tipC, s*d.span/2, d.wingZ+d.dihe+d.thick*.2],[rootX-d.rootC, s*d.r*.55, d.wingZ+d.thick/2],
+             [rootX, s*d.r*.55, d.wingZ-d.thick/2],[tipX, s*d.span/2, d.wingZ+d.dihe-d.thick*.2],
+             [tipX-d.tipC, s*d.span/2, d.wingZ+d.dihe-d.thick*.2],[rootX-d.rootC, s*d.r*.55, d.wingZ-d.thick/2]], WING);
+      // horizontal stabiliser
+      const hx = X(d.hD), htx = hx - d.hsweep, ht = d.thick*.45;
+      slab8([[hx, s*d.r*.3, d.hZ+ht/2],[htx, s*d.hspan, d.hZ+.5+ht*.2],
+             [htx-d.htipC, s*d.hspan, d.hZ+.5+ht*.2],[hx-d.hrootC, s*d.r*.3, d.hZ+ht/2],
+             [hx, s*d.r*.3, d.hZ-ht/2],[htx, s*d.hspan, d.hZ+.5-ht*.2],
+             [htx-d.htipC, s*d.hspan, d.hZ+.5-ht*.2],[hx-d.hrootC, s*d.r*.3, d.hZ-ht/2]], WING);
+      // engines: brand-colour nacelles with a dark intake face, an exhaust
+      // cone, and a pylon tying them to the wing underside
+      for (const [ey, ed, el, er] of d.engs) {
+        const wingUnder = d.wingZ + d.dihe * (ey/(d.span/2));
+        const ez = wingUnder - er*.8;
+        tube([[0,er*.8],[.55,er],[el*.7,er*.9],[el,er*.5]]
+          .map(([dd,r]) => ({x:X(ed) - dd, r, z:ez})), PRIM, s*ey, 18);
+        // intake: a dark fan disc just inside the lip
+        const fx0 = X(ed) - .12, fr = er*.72;
+        for (let i = 0; i < 18; i++) {
+          const a0 = i/18*Math.PI*2, a1 = (i+1)/18*Math.PI*2;
+          tri([fx0, s*ey, ez],
+              [fx0, s*ey + Math.sin(a0)*fr, ez + Math.cos(a0)*fr],
+              [fx0, s*ey + Math.sin(a1)*fr, ez + Math.cos(a1)*fr], DARK, [1,0,0]);
+        }
+        // exhaust cone
+        tube([[el,er*.42],[el+er*.9,er*.1]]
+          .map(([dd,r]) => ({x:X(ed) - dd, r, z:ez})), DARK, s*ey, 12);
+        // pylon
+        slab8([
+          [X(ed)-.9, s*(ey-.13), ez+er*.4],[X(ed)-.9, s*(ey+.13), ez+er*.4],
+          [X(ed)-el*.9, s*(ey+.13), ez+er*.4],[X(ed)-el*.9, s*(ey-.13), ez+er*.4],
+          [X(ed)-.9, s*(ey-.13), wingUnder+.2],[X(ed)-.9, s*(ey+.13), wingUnder+.2],
+          [X(ed)-el*.9, s*(ey+.13), wingUnder+.2],[X(ed)-el*.9, s*(ey-.13), wingUnder+.2]], WING);
+      }
+      // blended winglet at the tip, also in the brand colour
+      if (klass !== "small") {
+        const hs = d.span/2, wz = d.wingZ + d.dihe, wl = hs*.09 + 1.1;
+        const wA=[tipX, s*hs, wz], wB=[tipX-.7, s*(hs+.4), wz+wl],
+              wC=[tipX-.7-d.tipC*.6, s*(hs+.4), wz+wl], wD=[tipX-d.tipC, s*hs, wz];
+        slab8([wA,wB,wC,wD, wA,wB,wC,wD].map((p, i) =>
+          [p[0], p[1] + (i < 4 ? .07 : -.07), p[2]]), PRIM);
+      }
+    }
+    // vertical fin, swept, painted with the livery atlas's tail region
+    const fx = X(d.finD), ftx = fx - d.finSweep, fw = Math.max(d.thick*.4, .1);
+    const fzTop = d.finZ0 + d.finH;
+    const fp = [[fx, fw, d.finZ0], [ftx, fw*.5, fzTop],
+                [ftx - d.finTipC, fw*.5, fzTop], [fx - d.finRootC, fw, d.finZ0]];
+    const fnv = fp.map((p) => [p[0], -p[1], p[2]]);
+    const fuv = (p) => [
+      0.765 + Math.min(1, Math.max(0, (fx - p[0]) / (d.finRootC + d.finSweep))) * 0.225,
+      0.95 - ((p[2] - d.finZ0) / d.finH) * 0.9,
+    ];
+    const W = [1,1,1];
+    quad(fp[0], fp[1], fp[2], fp[3], W, [0, 1, 0], fp.map(fuv));
+    quad(fnv[3], fnv[2], fnv[1], fnv[0], W, [0, -1, 0], [fnv[3],fnv[2],fnv[1],fnv[0]].map(fuv));
+    quad(fp[0], fnv[0], fnv[1], fp[1], W, [1, 0, .2], [fp[0],fnv[0],fnv[1],fp[1]].map(fuv));
+    quad(fp[3], fp[2], fnv[2], fnv[3], W, [-1, 0, .2], [fp[3],fp[2],fnv[2],fnv[3]].map(fuv));
+    quad(fp[1], fnv[1], fnv[2], fp[2], W, [0, 0, 1], [fp[1],fnv[1],fnv[2],fp[2]].map(fuv));
+    if (klass === "small") {   // prop spinner
+      tube([{x:X(0)+.55, r:.06},{x:X(0), r:.34}], DARK, 0, 8);
+    }
+  }
+
+  // ---- pack as GLB (with the livery atlas embedded as the base colour) ----
+  const pos = new Float32Array(P), nor = new Float32Array(N), col = new Float32Array(C),
+    uv = new Float32Array(T);
+  const big = vi > 65535;
+  const idx = big ? new Uint32Array(I) : new Uint16Array(I);
+  const b64 = liveryCanvas.toDataURL("image/png").split(",")[1];
+  const texRaw = atob(b64);
+  const tex = new Uint8Array(texRaw.length);
+  for (let i = 0; i < texRaw.length; i++) tex[i] = texRaw.charCodeAt(i);
+  const mins = [Infinity,Infinity,Infinity], maxs = [-Infinity,-Infinity,-Infinity];
+  for (let i = 0; i < P.length; i += 3) for (let k = 0; k < 3; k++) {
+    mins[k] = Math.min(mins[k], P[i+k]); maxs[k] = Math.max(maxs[k], P[i+k]);
+  }
+  const align = (n) => Math.ceil(n/4)*4;
+  const o0 = 0, o1 = align(pos.byteLength), o2 = o1 + align(nor.byteLength),
+    o3 = o2 + align(col.byteLength), o4 = o3 + align(uv.byteLength),
+    o5 = o4 + align(idx.byteLength), binLen = o5 + align(tex.byteLength);
+  const json = {
+    asset:{version:"2.0"}, scene:0, scenes:[{nodes:[0]}], nodes:[{mesh:0}],
+    extensionsUsed:["KHR_materials_unlit"],
+    meshes:[{primitives:[{attributes:{POSITION:0,NORMAL:1,COLOR_0:2,TEXCOORD_0:3},indices:4,material:0}]}],
+    materials:[{pbrMetallicRoughness:{
+      baseColorFactor:[1,1,1,1], baseColorTexture:{index:0},
+      metallicFactor:0, roughnessFactor:1}, doubleSided:true,
+      extensions:{KHR_materials_unlit:{}}}],
+    images:[{bufferView:5, mimeType:"image/png"}],
+    samplers:[{magFilter:9729, minFilter:9729, wrapS:33071, wrapT:33071}],
+    textures:[{sampler:0, source:0}],
+    buffers:[{byteLength:binLen}],
+    bufferViews:[
+      {buffer:0,byteOffset:o0,byteLength:pos.byteLength,target:34962},
+      {buffer:0,byteOffset:o1,byteLength:nor.byteLength,target:34962},
+      {buffer:0,byteOffset:o2,byteLength:col.byteLength,target:34962},
+      {buffer:0,byteOffset:o3,byteLength:uv.byteLength,target:34962},
+      {buffer:0,byteOffset:o4,byteLength:idx.byteLength,target:34963},
+      {buffer:0,byteOffset:o5,byteLength:tex.byteLength}],
+    accessors:[
+      {bufferView:0,componentType:5126,count:vi,type:"VEC3",min:mins,max:maxs},
+      {bufferView:1,componentType:5126,count:vi,type:"VEC3"},
+      {bufferView:2,componentType:5126,count:vi,type:"VEC3"},
+      {bufferView:3,componentType:5126,count:vi,type:"VEC2"},
+      {bufferView:4,componentType:big?5125:5123,count:I.length,type:"SCALAR"}]
+  };
+  const jsonBytes = new TextEncoder().encode(JSON.stringify(json));
+  const jLen = align(jsonBytes.length);
+  const total = 12 + 8 + jLen + 8 + binLen;
+  const glb = new ArrayBuffer(total);
+  const dv = new DataView(glb);
+  const u8 = new Uint8Array(glb);
+  dv.setUint32(0, 0x46546C67, true); dv.setUint32(4, 2, true); dv.setUint32(8, total, true);
+  dv.setUint32(12, jLen, true); dv.setUint32(16, 0x4E4F534A, true);
+  u8.set(jsonBytes, 20); u8.fill(0x20, 20 + jsonBytes.length, 20 + jLen);
+  const bo = 20 + jLen;
+  dv.setUint32(bo, binLen, true); dv.setUint32(bo+4, 0x004E4942, true);
+  u8.set(new Uint8Array(pos.buffer), bo+8+o0);
+  u8.set(new Uint8Array(nor.buffer), bo+8+o1);
+  u8.set(new Uint8Array(col.buffer), bo+8+o2);
+  u8.set(new Uint8Array(uv.buffer), bo+8+o3);
+  u8.set(new Uint8Array(idx.buffer), bo+8+o4);
+  u8.set(tex, bo+8+o5);
+  return u8;
+}
+
+// "klass|airline" -> Cesium.Model (or an in-flight promise while loading)
+const aircraftModels = new Map();
+const MODEL_CACHE_MAX = 10;
+async function ensureAircraftModel(klass, livery) {
+  const key = klass + "|" + livery.key;
+  const hit = aircraftModels.get(key);
+  if (hit) return hit;
+  const glb = buildAircraftGlb(klass,
+    makeLiveryCanvas(livery.primary, livery.secondary, livery.title),
+    hexToRgb01(livery.primary));
+  const url = URL.createObjectURL(new Blob([glb], { type: "model/gltf-binary" }));
+  const p = Cesium.Model.fromGltfAsync({ url, upAxis: Cesium.Axis.Z, forwardAxis: Cesium.Axis.X })
+    .then((model) => {
+      model.show = false;   // unlit material: shading is baked into the mesh
+      scene.primitives.add(model);
+      aircraftModels.set(key, model);
+      // One model per airline adds up on a long session — retire the oldest
+      for (const [k, v] of aircraftModels) {
+        if (aircraftModels.size <= MODEL_CACHE_MAX) break;
+        if (k !== key && v instanceof Cesium.Model && !v.show) {
+          scene.primitives.remove(v);          // remove() also destroys it
+          aircraftModels.delete(k);
+        }
+      }
+      return model;
+    });
+  aircraftModels.set(key, p);
+  return p;
+}
+
+/* What heading must be passed to headingPitchRollToFixedFrame so the frame's
+ * +X axis points at a given azimuth — measured once instead of assumed, so a
+ * change of Cesium's frame convention can't silently spin every model. */
+const MODEL_HDG_OFFSET = (() => {
+  const o = Cesium.Cartesian3.fromDegrees(0, 45);
+  const fr = Cesium.Transforms.headingPitchRollToFixedFrame(o, new Cesium.HeadingPitchRoll(0, 0, 0));
+  const enu = Cesium.Transforms.eastNorthUpToFixedFrame(o);
+  const dot = (m, c, v) => m[c*4]*v.x + m[c*4+1]*v.y + m[c*4+2]*v.z;
+  const x = new Cesium.Cartesian3(fr[0], fr[1], fr[2]);
+  return Math.atan2(dot(enu, 0, x), dot(enu, 1, x));   // azimuth of frame +X at heading 0
+})();
+
+let model3dHiding = null;    // hex whose billboard the model has replaced
+let view3d = false;
+let models3dOk = true;       // fail-soft: one bad frame disables the feature
+const _mHpr = new Cesium.HeadingPitchRoll();
+const _mEnu = new Cesium.Matrix4();
+const _mCamPos = new Cesium.Cartesian3(), _mCamDir = new Cesium.Cartesian3(),
+  _mCamUp = new Cesium.Cartesian3();
+
+function update3DModel() {
+  if (!models3dOk) return;
+  try {
+    const f = selectedHex && flights.get(selectedHex);
+    let m = null;
+    if (f && f.data) {
+      const livery = liveryFor(f.data.flight);
+      const cand = aircraftModels.get(f.klass + "|" + livery.key);
+      if (cand instanceof Cesium.Model) m = cand;
+      else if (!cand) ensureAircraftModel(f.klass, livery);   // late reclassification/callsign
+    }
+    const near = f && Cesium.Cartesian3.distance(viewer.camera.positionWC, f.billboard.position) < MODEL_SHOW_RANGE_M;
+    const active = m && (near || view3d) ? m : null;
+
+    aircraftModels.forEach((v) => { if (v instanceof Cesium.Model && v !== active) v.show = false; });
+    if (!active) {
+      if (model3dHiding) {
+        const prev = flights.get(model3dHiding);
+        if (prev) prev.billboard.show = true;
+        model3dHiding = null;
+        applyAirlineFilter();          // the filter, not us, owns billboard.show
+      }
+      if (view3d && !f) exitView3d();  // the followed plane left the feed
+      return;
+    }
+
+    const hdg = planeHeading(f);
+    const vr = typeof f.data.baro_rate === "number" ? f.data.baro_rate : 0;
+    const gsMs = (f.data.gs || 0) * KNOTS_TO_MS;
+    _mHpr.heading = Cesium.Math.toRadians(hdg) - MODEL_HDG_OFFSET;
+    // Nose follows the vertical rate (ft/min → m/s), clamped to a real deck angle
+    _mHpr.pitch = gsMs > 30 ? Math.max(-.21, Math.min(.21, Math.atan2(vr * .00508, gsMs))) : 0;
+    _mHpr.roll = 0;
+    Cesium.Transforms.headingPitchRollToFixedFrame(
+      f.billboard.position, _mHpr, Cesium.Ellipsoid.WGS84, undefined, active.modelMatrix);
+    active.id = "plane:" + selectedHex;   // clicking the model is just a reselect
+    active.show = true;
+    if (model3dHiding !== selectedHex) {
+      if (model3dHiding) {
+        const prev = flights.get(model3dHiding);
+        if (prev) prev.billboard.show = true;
+      }
+      model3dHiding = selectedHex;
+    }
+    f.billboard.show = false;
+    // Chase view. lookAtTransform alone preserves the camera's WORLD pose —
+    // the plane would simply fly out of frame. While a transform is active
+    // the camera's position/direction/up are frame-local, so: capture that
+    // local pose, move the frame to the plane's new position, and re-apply
+    // it. The camera follows the aircraft, and user orbit/zoom (which edit
+    // the same local pose) survive from frame to frame.
+    if (view3d) {
+      const cam = viewer.camera;
+      Cesium.Cartesian3.clone(cam.position, _mCamPos);
+      Cesium.Cartesian3.clone(cam.direction, _mCamDir);
+      Cesium.Cartesian3.clone(cam.up, _mCamUp);
+      Cesium.Transforms.eastNorthUpToFixedFrame(f.billboard.position, Cesium.Ellipsoid.WGS84, _mEnu);
+      cam.lookAtTransform(_mEnu);
+      Cesium.Cartesian3.clone(_mCamPos, cam.position);
+      Cesium.Cartesian3.clone(_mCamDir, cam.direction);
+      Cesium.Cartesian3.clone(_mCamUp, cam.up);
+      Cesium.Cartesian3.cross(cam.direction, cam.up, cam.right);
+    }
+  } catch (err) {
+    console.warn("3D aircraft disabled:", err.message || err);
+    models3dOk = false;
+    aircraftModels.forEach((v) => { if (v instanceof Cesium.Model) v.show = false; });
+    if (model3dHiding) {
+      const prev = flights.get(model3dHiding);
+      if (prev) prev.billboard.show = true;
+      model3dHiding = null;
+    }
+    if (view3d) exitView3d();
+  }
+}
+
+function enterView3d() {
+  const f = selectedHex && flights.get(selectedHex);
+  if (!f || !models3dOk) return;
+  view3d = true;
+  applyZoomFloor();     // chase view needs the close floor even in weather mode
+  const btn = document.getElementById("fp3d");
+  btn.classList.add("active");
+  btn.setAttribute("aria-pressed", "true");
+  ensureAircraftModel(f.klass, liveryFor(f.data && f.data.flight));
+  const len = MODEL_LENGTHS[f.klass] || 40;
+  // Rear-left three-quarter view, slightly above — the classic chase angle
+  viewer.camera.lookAt(f.billboard.position,
+    new Cesium.HeadingPitchRange(Cesium.Math.toRadians(planeHeading(f)) + .55, -.16, len * 3.6));
+}
+
+function exitView3d() {
+  view3d = false;
+  applyZoomFloor();
+  const btn = document.getElementById("fp3d");
+  if (btn) { btn.classList.remove("active"); btn.setAttribute("aria-pressed", "false"); }
+  viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+}
+
+document.getElementById("fp3d").addEventListener("click", () => view3d ? exitView3d() : enterView3d());
 
 /* ----- Feature #7: airport flip-board -----
  * Which aircraft belong to an airport is decided entirely client-side from the
@@ -3310,6 +3916,156 @@ if (featureOn("flipBoard")) {
 const DENSITY_MS = 2000;          // hard floor on redraws
 const DENSITY_TEX = 256;          // heat texture resolution
 const DENSITY_RADIUS = 15;        // px of influence per aircraft, in texture space
+/* ----- Live weather: clouds + precipitation radar ----------------------
+ * Clouds are the Band-13 infrared composites of the three geostationary
+ * satellites on NASA GIBS (GOES-East, GOES-West, Himawari — 10-minute
+ * cadence, keyless). GIBS serves them as an opaque analyst colormap: gray
+ * ground, colored storm tops, black off-disc — useless as an overlay. So a
+ * tiny custom provider repaints every tile on a canvas: clear air becomes
+ * transparent, cloud becomes translucent white, and the saturated
+ * enhancement colours (deep convection) keep their colour. Europe/Africa
+ * have no geostationary layer on GIBS and stay cloud-free.
+ * Precipitation is RainViewer's global radar composite, which is already a
+ * transparent overlay — no processing needed. */
+const WX_IR_LAYERS = [
+  "GOES-East_ABI_Band13_Clean_Infrared",
+  "GOES-West_ABI_Band13_Clean_Infrared",
+  "Himawari_AHI_Band13_Clean_Infrared",
+];
+const WX_REFRESH_MS = 5 * 60 * 1000;
+
+function irToClouds(img) {
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = 256;
+  const ctx = cv.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, 256, 256);
+  const d = ctx.getImageData(0, 0, 256, 256);
+  const p = d.data;
+  for (let i = 0; i < p.length; i += 4) {
+    const r = p[i], g = p[i+1], b = p[i+2];
+    if (Math.max(r, g, b) - Math.min(r, g, b) > 40) {
+      p[i+3] = 235;                       // enhancement colour = storm top: keep it
+    } else {
+      const L = (r + g + b) / 3;          // gray ramp: warm/clear → transparent
+      const a = Math.max(0, Math.min(1, (L - 120) / 110));
+      p[i] = p[i+1] = p[i+2] = 255;
+      p[i+3] = Math.round(a * a * 220);   // a² keeps thin haze from fogging the map
+    }
+  }
+  ctx.putImageData(d, 0, 0);
+  return cv;
+}
+
+class IrCloudProvider {
+  constructor(layerId, time) {
+    this._layerId = layerId;
+    this._time = time;
+    this._tilingScheme = new Cesium.WebMercatorTilingScheme();
+    this._errorEvent = new Cesium.Event();
+    this._credit = new Cesium.Credit("Clouds: NOAA / NASA GIBS");
+  }
+  get tilingScheme() { return this._tilingScheme; }
+  get rectangle() { return this._tilingScheme.rectangle; }
+  get tileWidth() { return 256; }
+  get tileHeight() { return 256; }
+  get maximumLevel() { return 6; }
+  get minimumLevel() { return 0; }
+  get tileDiscardPolicy() { return undefined; }
+  get errorEvent() { return this._errorEvent; }
+  get credit() { return this._credit; }
+  get proxy() { return undefined; }
+  get hasAlphaChannel() { return true; }
+  getTileCredits() { return undefined; }
+  pickFeatures() { return undefined; }
+  requestImage(x, y, level, request) {
+    const url = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/" +
+      `${this._layerId}/default/${this._time}/GoogleMapsCompatible_Level6/${level}/${y}/${x}.png`;
+    const p = Cesium.Resource.fetchImage({ url, request, preferImageBitmap: true, flipY: false });
+    if (!p) return undefined;             // throttled — Cesium will re-request
+    return p.then(irToClouds).catch(() => undefined);
+  }
+}
+
+/* The satellites publish on a ~20–60 min delay: walk back through 10-minute
+ * slots until one actually serves tiles, so a freshly-published gap can't
+ * blank the layer. */
+async function latestGibsSlot() {
+  const tried = new Set();
+  for (let back = 20; back <= 90; back += 10) {
+    const ts = new Date(Math.floor((Date.now() - back * 60000) / 600000) * 600000)
+      .toISOString().replace(".000Z", "Z");
+    if (tried.has(ts)) continue;
+    tried.add(ts);
+    try {
+      const r = await fetch("https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/" +
+        `${WX_IR_LAYERS[0]}/default/${ts}/GoogleMapsCompatible_Level6/0/0/0.png`);
+      if (r.ok) return ts;
+    } catch (e) { /* network hiccup — try an older slot */ }
+  }
+  return null;
+}
+
+let wxOn = false, wxTimer = null, wxLayers = [], wxBusy = false;
+
+/* With weather on, zooming below the radar's native resolution just shows
+ * upscaled blur — stop at ~32 km instead. The chase view is exempt: orbiting
+ * a 40 m aircraft needs the normal 250 m floor back. */
+const ZOOM_FLOOR_DEFAULT = 250;
+const ZOOM_FLOOR_WEATHER = 32000;
+function applyZoomFloor() {
+  scene.screenSpaceCameraController.minimumZoomDistance =
+    (wxOn && !view3d) ? ZOOM_FLOOR_WEATHER : ZOOM_FLOOR_DEFAULT;
+}
+
+async function wxRefresh() {
+  if (!wxOn || wxBusy) return;
+  wxBusy = true;
+  try {
+    const next = [];
+    const slot = await latestGibsSlot();
+    if (slot) {
+      for (const id of WX_IR_LAYERS) {
+        next.push(new Cesium.ImageryLayer(new IrCloudProvider(id, slot), { alpha: 0.88 }));
+      }
+    }
+    try {
+      const j = await (await fetch("https://api.rainviewer.com/public/weather-maps.json")).json();
+      const fr = j.radar && j.radar.past && j.radar.past[j.radar.past.length - 1];
+      if (fr) {
+        next.push(new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
+          url: `${j.host}${fr.path}/512/{z}/{x}/{y}/2/1_1.png`,
+          maximumLevel: 9,
+          credit: new Cesium.Credit("Radar © RainViewer"),
+        }), { alpha: 0.82 }));
+      }
+    } catch (e) {
+      console.warn("Radar unavailable:", e.message || e);   // clouds still show
+    }
+    if (!wxOn) { next.forEach((l) => viewer.imageryLayers.remove(l, true)); return; }
+    next.forEach((l) => viewer.imageryLayers.add(l));
+    wxLayers.forEach((l) => viewer.imageryLayers.remove(l, true));
+    wxLayers = next;
+  } finally {
+    wxBusy = false;
+  }
+}
+
+function setWeather(on) {
+  wxOn = on;
+  document.getElementById("wxToggle").setAttribute("aria-pressed", String(on));
+  if (on) {
+    wxRefresh();
+    wxTimer = setInterval(wxRefresh, WX_REFRESH_MS);
+  } else {
+    clearInterval(wxTimer);
+    wxTimer = null;
+    wxLayers.forEach((l) => viewer.imageryLayers.remove(l, true));
+    wxLayers = [];
+  }
+  applyZoomFloor();
+}
+document.getElementById("wxToggle").addEventListener("click", () => setWeather(!wxOn));
+
 let densityOn = false;
 let densityEntity = null;
 let densityLastDraw = 0;
@@ -4285,7 +5041,7 @@ function previewTo(trackFrac, info) {
 
   const g = ensureGhost(rec ? rec.klass : "jet");
   g.position = Cesium.Cartesian3.fromDegrees(lon, lat, altFt * FT_TO_M);
-  g.rotation = viewer.camera.heading - Cesium.Math.toRadians(brg);
+  g.rotation = screenRotation(g.position, brg);
   previewGhostPos = g.position;
   drawPreviewTrail(selectedHex, cruiseFt);
 
@@ -4329,7 +5085,7 @@ function applyScrub(spanFrac, info) {
 
   const g = ensureGhost(rec ? rec.klass : "jet");
   g.position = Cesium.Cartesian3.fromDegrees(fix.lon, fix.lat, fix.altFt * FT_TO_M);
-  g.rotation = viewer.camera.heading - Cesium.Math.toRadians(fix.track || 0);
+  g.rotation = screenRotation(g.position, fix.track || 0);
 
   // Handle sits where the replayed fix falls on the track: its route position
   // in route mode, the raw span fraction otherwise.
@@ -4396,6 +5152,7 @@ function setSelectedColor(hex, selected) {
   if (f) f.billboard.color = selected ? PLANE_SELECTED : ICONS[f.klass].color;
 }
 function closeFlightPanel() {
+  if (view3d) exitView3d();
   if (selectedHex) setSelectedColor(selectedHex, false);
   selectedHex = null;
   flightPanel.classList.remove("open");
@@ -4416,6 +5173,8 @@ setInterval(() => {
 
 function selectFlight(hex) {
   if (selectedHex && selectedHex !== hex) setSelectedColor(selectedHex, false);
+  // The chase view belongs to the flight it was following, not the next one.
+  if (view3d && selectedHex !== hex) exitView3d();
   // A replay belongs to the flight it was scrubbing, never to the next one.
   safe("timelineScrubber", () => clearScrub());
   selectedHex = hex;
@@ -4423,6 +5182,8 @@ function selectFlight(hex) {
   safe("flipBoard", () => hideFlipBoard());       // flight panel takes the spot
   const f = flights.get(hex);
   if (f) { updateFlightPanel(f.data); flightPanel.classList.add("open"); }
+  // Start the 3D model load now so it's ready if the camera comes close
+  if (f && models3dOk) ensureAircraftModel(f.klass, liveryFor(f.data && f.data.flight)).catch(() => {});
   updateStar();
   if (trailHex !== hex) showTrail(hex);
   if (routeHex !== hex) showRoute(hex);
@@ -5560,9 +6321,15 @@ function cameraHeight() {
   return viewer.camera.positionCartographic.height;
 }
 function zoom(factor) {
-  const amount = cameraHeight() * factor;
-  if (factor > 0) viewer.camera.zoomIn(amount);
-  else viewer.camera.zoomOut(-amount);
+  let amount = cameraHeight() * factor;
+  if (factor > 0) {
+    // The buttons bypass the camera controller, so honour its floor here too
+    const floor = scene.screenSpaceCameraController.minimumZoomDistance;
+    amount = Math.min(amount, Math.max(0, cameraHeight() - floor));
+    if (amount > 0) viewer.camera.zoomIn(amount);
+  } else {
+    viewer.camera.zoomOut(-amount);
+  }
 }
 function tilt(deltaDeg) {
   const cam = viewer.camera;

@@ -57,3 +57,6 @@ Flight data: [adsb.lol](https://adsb.lol), [adsb.fi](https://adsb.fi),
 [airplanes.live](https://airplanes.live),
 [OpenSky Network](https://opensky-network.org) (global feed).
 Imagery: Google Maps Platform, Cesium, NASA GIBS (VIIRS Black Marble).
+Weather: [RainViewer](https://rainviewer.com) (precipitation radar),
+NOAA / [NASA GIBS](https://nasa-gibs.github.io/gibs-api-docs/) GOES-East,
+GOES-West and Himawari Band-13 infrared (cloud layer).
