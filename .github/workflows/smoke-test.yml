@@ -1,8 +1,11 @@
-name: smoke test
+name: tests
 
-# Guards the 3D render pipeline — the app's most fragile, most invisible-to-review
-# failure mode. Loads index.html in a real headless browser and asserts the globe
-# actually paints (no blank canvas) with zero uncaught JS errors. See tests/smoke.mjs.
+# Two guards:
+#  - smoke: loads index.html in a real headless browser and asserts the globe
+#    actually paints (no blank canvas) with zero uncaught JS errors — the app's
+#    most fragile, most invisible-to-review failure mode. See tests/smoke.mjs.
+#  - parity: asserts the OpenSky normalizers in index.ts and server.py stay in
+#    lockstep so the deliberately-duplicated proxies don't drift. See parity.mjs.
 
 on:
   push:
@@ -23,6 +26,10 @@ jobs:
       - name: Install test dependencies
         working-directory: tests
         run: npm install
+
+      - name: Run backend parity test (index.ts vs server.py)
+        working-directory: tests
+        run: node parity.mjs
 
       - name: Install Chromium for Playwright
         working-directory: tests
