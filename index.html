@@ -3205,15 +3205,6 @@ async function pollFlights(retry) {
     f.data = ac;
     f.fetchedAt = now;
     extendTrail(ac);
-    // Short rolling track behind every aircraft, so any plane the camera drifts
-    // near can show the FR24-style green tail without waiting on the per-flight
-    // history fetch (that stays reserved for the fully selected aircraft).
-    (f.recent || (f.recent = [])).push({
-      lon: ac.lon, lat: ac.lat,
-      m: flightAltitudeMeters(ac),
-      ft: typeof ac.alt_baro === "number" ? ac.alt_baro : 0,
-    });
-    if (f.recent.length > NEARBY_TRAIL_POINTS) f.recent.shift();
   }
   // Drop aircraft that left the query circle or went silent
   for (const [hex, f] of flights) {
@@ -3316,12 +3307,10 @@ scene.preRender.addEventListener(() => {
  * no CORS headers, so they can't be WebGL textures — a positioned <img>
  * shows them without tainting anything). Both are capped and range-gated so
  * the feature only lights up once you've zoomed into an area. */
-const NEARBY_TRAIL_POINTS = 14;      // rolling track length kept per aircraft
-const NEARBY_MAX = 10;               // most labels/trails drawn at once
+const NEARBY_MAX = 10;               // most nearby labels drawn at once
 const NEARBY_RANGE_M = 90000;        // camera-to-plane cutoff (~zoomed-in only)
 const NEARBY_LABEL_STEP = 3;         // reposition labels every Nth frame
 
-const nearbyTrails = scene.primitives.add(new Cesium.PolylineCollection());
 const nearbyLabelsEl = document.getElementById("nearbyLabels");
 const nearbyLabelPool = [];          // reusable DOM tags
 let nearbySet = [];                  // [{ hex, f }] chosen at the last poll
@@ -3355,17 +3344,17 @@ function fmtAltFt(ac) {
   return ft == null ? "—" : ft.toLocaleString("en-US") + " ft";
 }
 
-// Rebuild the chosen set of nearby aircraft and their trails. Runs on each
-// poll (positions and altitudes are fresh then) rather than every frame.
+// Rebuild the chosen set of nearby aircraft. The trail belongs to the tracked
+// aircraft alone — only its selection draws a path — so this now feeds the
+// callsign/altitude labels only, no per-plane trails.
 function rebuildNearbyTraffic() {
-  nearbyTrails.removeAll();
   nearbySet = [];
   if (!flights.size) { updateNearbyLabels(); return; }
   Cesium.Cartesian3.clone(viewer.camera.positionWC, _nbCam);
   const cands = [];
   flights.forEach((f, hex) => {
-    if (hex === selectedHex) return;                 // the selected plane owns the rich trail
-    if (!f.data || !f.recent || f.recent.length < 2) return;
+    if (hex === selectedHex) return;                 // the selected plane owns the trail
+    if (!f.data || typeof f.data.lat !== "number") return;
     if (!f.billboard || f.billboard.show === false) return;
     const d = Cesium.Cartesian3.distance(_nbCam, f.billboard.position);
     if (d > NEARBY_RANGE_M) return;
@@ -3373,17 +3362,6 @@ function rebuildNearbyTraffic() {
   });
   cands.sort((a, b) => a.d - b.d);
   nearbySet = cands.slice(0, NEARBY_MAX);
-  for (const { f } of nearbySet) {
-    const pts = f.recent.map((p) => Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.m));
-    pts.push(f.billboard.position.clone());          // connect the tail to the live glyph
-    nearbyTrails.add({
-      positions: pts,
-      width: 2.4,
-      material: Cesium.Material.fromType("Color", {
-        color: altitudeColor(f.recent[f.recent.length - 1].ft),
-      }),
-    });
-  }
   updateNearbyLabels();
 }
 
@@ -4134,6 +4112,111 @@ const _mEnu = new Cesium.Matrix4();
 const _mCamPos = new Cesium.Cartesian3(), _mCamDir = new Cesium.Cartesian3(),
   _mCamUp = new Cesium.Cartesian3();
 
+/* ----- Ground traffic: airport comes alive ---------------------------
+ * When the tracked plane is sitting on the ground, the other aircraft on the
+ * same field are drawn as their own 3D airframes too — so the ramp reads as
+ * real jets taxiing and holding, not flat glyphs. Each nearby on-ground plane
+ * gets its own Model instance (the selected-plane cache is one-per-type and
+ * can only sit in one place at a time), keyed by hex, capped and radius-gated
+ * to the airport. Everything is torn down the moment the tracked plane lifts
+ * off or is deselected. */
+const groundModels = new Map();    // hex -> Cesium.Model | in-flight promise
+const groundHidden = new Set();    // hexes whose billboard a ground model hides
+let groundChosen = [];             // [{hex,f}] currently drawn
+let groundActive = false;
+let groundGen = 0;                 // bumped on teardown to void in-flight loads
+let _gFrame = 0;
+const GROUND_MAX = 12;             // most simultaneous ground airframes
+const GROUND_RADIUS_KM = 5;        // "same airport" ramp/taxi area
+const GROUND_RESELECT = 30;        // frames between re-picking the nearby set
+const _gHpr = new Cesium.HeadingPitchRoll();
+
+function ensureGroundModel(ac) {
+  const hex = ac.hex, gen = groundGen;
+  const hit = groundModels.get(hex);
+  if (hit) return hit;
+  const url = FR24_MODEL_BASE + fr24ModelName(ac) + ".glb";
+  const p = Cesium.Model.fromGltfAsync({ url, incrementallyLoadTextures: false,
+    credit: new Cesium.Credit("3D models: Flightradar24 / FlightGear (GPL-2.0)") })
+    .then((model) => {
+      // Torn down (or slot reassigned) while loading — drop it.
+      if (gen !== groundGen || groundModels.get(hex) !== p) { try { model.destroy(); } catch (_) {} return null; }
+      model.show = false;
+      model._noseOffset = -Math.PI / 2;          // same FlightGear yaw fix as the tracked model
+      model.lightColor = new Cesium.Cartesian3(1.7, 1.7, 1.7);
+      scene.primitives.add(model);
+      groundModels.set(hex, model);
+      return model;
+    }).catch(() => { if (groundModels.get(hex) === p) groundModels.delete(hex); return null; });
+  groundModels.set(hex, p);
+  return p;
+}
+
+// Tear the whole ground fleet down and give the billboards back.
+function deactivateGroundTraffic() {
+  if (!groundActive && groundModels.size === 0) return;
+  groundGen++;
+  groundModels.forEach((v) => { if (v instanceof Cesium.Model) scene.primitives.remove(v); });
+  groundModels.clear();
+  const hadHidden = groundHidden.size > 0;
+  groundHidden.clear();
+  groundChosen = [];
+  groundActive = false;
+  if (hadHidden) applyAirlineFilter();   // the filter owns billboard.show
+}
+
+function updateGroundTraffic(selF) {
+  groundActive = true;
+  // Re-pick the nearby on-ground set periodically; reposition it every frame.
+  if (_gFrame++ % GROUND_RESELECT === 0) {
+    const c = Cesium.Cartographic.fromCartesian(selF.billboard.position);
+    const lat = Cesium.Math.toDegrees(c.latitude), lon = Cesium.Math.toDegrees(c.longitude);
+    const cands = [];
+    flights.forEach((f, hex) => {
+      if (hex === selectedHex || !f.data) return;
+      if (f.data.alt_baro !== "ground" || typeof f.data.lat !== "number") return;
+      const dkm = gcKm(lat, lon, f.data.lat, f.data.lon);
+      if (dkm <= GROUND_RADIUS_KM) cands.push({ hex, f, dkm });
+    });
+    cands.sort((a, b) => a.dkm - b.dkm);
+    groundChosen = cands.slice(0, GROUND_MAX);
+    const keep = new Set(groundChosen.map((x) => x.hex));
+    // Hide models that fell out of the set; give their billboards back.
+    groundModels.forEach((v, hex) => {
+      if (keep.has(hex) || !(v instanceof Cesium.Model)) return;
+      v.show = false;
+      if (groundHidden.has(hex)) {
+        const f = flights.get(hex);
+        if (f && f.billboard && hex !== selectedHex) f.billboard.show = true;
+        groundHidden.delete(hex);
+      }
+    });
+    // Cap the pool: destroy hidden, out-of-set airframes if it grew too large.
+    if (groundModels.size > GROUND_MAX * 2) {
+      for (const [hex, v] of groundModels) {
+        if (groundModels.size <= GROUND_MAX * 2) break;
+        if (!keep.has(hex) && v instanceof Cesium.Model && !v.show) {
+          scene.primitives.remove(v); groundModels.delete(hex);
+        }
+      }
+    }
+  }
+  for (const { hex, f } of groundChosen) {
+    if (!flights.has(hex) || !f.data || f.data.alt_baro !== "ground") continue;
+    const cand = groundModels.get(hex);
+    if (!cand) { ensureGroundModel(f.data); continue; }
+    if (!(cand instanceof Cesium.Model) || !cand.ready) continue;
+    _gHpr.heading = Cesium.Math.toRadians(planeHeading(f)) - (cand._noseOffset || 0);
+    _gHpr.pitch = 0; _gHpr.roll = 0;   // level on the tarmac
+    Cesium.Transforms.headingPitchRollToFixedFrame(
+      f.billboard.position, _gHpr, Cesium.Ellipsoid.WGS84, undefined, cand.modelMatrix);
+    cand.id = "plane:" + hex;          // clicking a ground jet selects it
+    cand.color = Cesium.Color.WHITE; cand.colorBlendAmount = 0;   // stock livery
+    cand.show = true;
+    if (!groundHidden.has(hex)) { f.billboard.show = false; groundHidden.add(hex); }
+  }
+}
+
 function update3DModel() {
   if (!models3dOk) return;
   try {
@@ -4157,6 +4240,7 @@ function update3DModel() {
       }
       if (view3d && !f) exitView3d();  // the followed plane left the feed
       if (gearModel instanceof Cesium.Model) gearModel.show = false;
+      deactivateGroundTraffic();
       return;
     }
 
@@ -4196,6 +4280,13 @@ function update3DModel() {
     active.id = "plane:" + selectedHex;   // clicking the model is just a reselect
     active.show = true;
     updateGear(active, f, dt);   // deploy/retract the gear off the same frame
+    // When the tracked plane is on the ground, bring the rest of the field to
+    // life as 3D airframes too. Isolated so a ground hiccup can't disable the
+    // tracked model.
+    try {
+      if (f.data.alt_baro === "ground") updateGroundTraffic(f);
+      else deactivateGroundTraffic();
+    } catch (ge) { console.warn("ground traffic:", ge.message || ge); deactivateGroundTraffic(); }
 
     // Stock livery: show each airframe exactly as it ships — no colour blend, so
     // the model's own paint/shading comes through untouched.
@@ -4233,6 +4324,7 @@ function update3DModel() {
     console.warn("3D aircraft disabled:", err.message || err);
     models3dOk = false;
     aircraftModels.forEach((v) => { if (v instanceof Cesium.Model) v.show = false; });
+    deactivateGroundTraffic();
     if (model3dHiding) {
       const prev = flights.get(model3dHiding);
       if (prev) prev.billboard.show = true;
