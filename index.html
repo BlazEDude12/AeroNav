@@ -2031,7 +2031,11 @@ async function showTrail(hex) {
       if (seg.length > 1) trailPrimitives.push(makeTrailPrimitive(seg, alts));
       seg = []; alts = [];
     }
-    seg.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat, (p.alt_ft || 0) * FT_TO_M));
+    // Low history points get the same ground-relative correction as the live
+    // aircraft, so the drawn approach meets the runway instead of floating a
+    // field-elevation above it. High points skip the lookup entirely.
+    const pSurf = (p.alt_ft || 0) < 8000 ? groundElevFt(p.lat, p.lon) : null;
+    seg.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat, aglBlendMeters(p.alt_ft || 0, pSurf)));
     alts.push(p.alt_ft || 0);
     prevTs = t;
     prevLat = p.lat; prevLon = p.lon;
@@ -3002,8 +3006,39 @@ let flightEndpoint = FLIGHT_DATA_URL;
 const LOCAL_GLOBAL_URL =
   ["localhost", "127.0.0.1"].includes(location.hostname) ? "/flights" : "";
 
+/* Barometric altitude is sea-level-referenced, but the globe carries no
+ * terrain — the runway imagery sits at height 0. Rendered raw, a plane on
+ * final at a 433 ft field floats ~130 m above the runway, coasts down its
+ * whole length, then falls onto it the moment the feed flips to "ground".
+ * So near the surface the render height becomes height-above-ground: the
+ * local ground elevation (Open-Meteo, cached per ~11 km cell — the same
+ * lookup flightMode already uses) is subtracted with a weight that is 1 at
+ * the surface and fades out by 3,000 ft AGL. Cruise renders exactly as
+ * before; a landing flies down to the runway and touches at the threshold,
+ * and a departure lifts off from it, with no pop either way. */
+const SURF_FULL_FT = 1000;    // below this AGL the correction is exact
+const SURF_BLEND_FT = 3000;   // fully sea-level-referenced above this AGL
+function aglBlendMeters(altFt, surfFt) {
+  const alt = Math.max(altFt, 0);
+  if (typeof surfFt === "number" && surfFt > 0) {
+    const agl = alt - surfFt;
+    const w = Cesium.Math.clamp((SURF_BLEND_FT - agl) / (SURF_BLEND_FT - SURF_FULL_FT), 0, 1);
+    return Math.max(alt - surfFt * w, 0) * FT_TO_M;
+  }
+  return alt * FT_TO_M;
+}
+// Cache-only surface peek for everyone; only low traffic in circle (zoomed-in)
+// mode may trigger the elevation fetch — the global feed never fires requests.
+function surfFtForRender(ac) {
+  if (typeof ac.lat !== "number") return null;
+  const hit = elevCache.get(ac.lat.toFixed(1) + "," + ac.lon.toFixed(1));
+  if (hit !== undefined) return hit;
+  if (!globalMode && typeof ac.alt_baro === "number" && ac.alt_baro < 8000)
+    return groundElevFt(ac.lat, ac.lon);
+  return null;
+}
 function flightAltitudeMeters(ac) {
-  return typeof ac.alt_baro === "number" ? Math.max(ac.alt_baro, 0) * FT_TO_M : 0;
+  return typeof ac.alt_baro === "number" ? aglBlendMeters(ac.alt_baro, ac._surfFt) : 0;
 }
 
 // Initial bearing (degrees) from point 1 to point 2
@@ -3165,6 +3200,17 @@ async function pollFlights(retry) {
         f.liftAlt = ac.alt_baro;
       if (typeof ac.baro_rate === "number" && ac.baro_rate <= -400)
         f.sinkAt = now;
+    }
+    // Ground elevation under the aircraft, for ground-relative rendering low
+    // down. Eased over a few polls so an elevation that arrives mid-approach
+    // slides the plane onto the corrected path instead of popping it.
+    {
+      const surfTgt = surfFtForRender(ac);
+      if (typeof surfTgt === "number") {
+        if (f.surfFt == null) f.surfFt = f.data ? 0 : surfTgt;
+        f.surfFt += (surfTgt - f.surfFt) * 0.5;
+      }
+      ac._surfFt = f.surfFt;
     }
     f.data = ac;
     f.fetchedAt = now;
@@ -3910,7 +3956,11 @@ function updateGear(active, f, dt) {
   const eligible = active && active.ready && active._fr24 && GEAR_RETRACTABLE.has(f.klass);
   if (!eligible) { gm.show = false; return; }
   const alt = f.data.alt_baro;
-  const tgt = (alt === "ground" || (typeof alt === "number" && alt < GEAR_ALT_FT)) ? 1 : 0;
+  // Gear cycles on height ABOVE THE FIELD, not sea level, so it still deploys
+  // on approach into high-elevation airports (Denver sits at 5,400 ft MSL).
+  const aglFt = typeof alt === "number"
+    ? alt - (typeof f.data._surfFt === "number" ? f.data._surfFt : 0) : alt;
+  const tgt = (alt === "ground" || (typeof aglFt === "number" && aglFt < GEAR_ALT_FT)) ? 1 : 0;
   const k = 1 - Math.exp(-dt / GEAR_TAU);
   f._gear = f._gear == null ? tgt : f._gear + (tgt - f._gear) * k;
   if (f._gear < 0.02) { gm.show = false; return; }
