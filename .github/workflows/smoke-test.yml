@@ -1,0 +1,33 @@
+name: smoke test
+
+# Guards the 3D render pipeline — the app's most fragile, most invisible-to-review
+# failure mode. Loads index.html in a real headless browser and asserts the globe
+# actually paints (no blank canvas) with zero uncaught JS errors. See tests/smoke.mjs.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install test dependencies
+        working-directory: tests
+        run: npm install
+
+      - name: Install Chromium for Playwright
+        working-directory: tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Run smoke test
+        working-directory: tests
+        run: node smoke.mjs

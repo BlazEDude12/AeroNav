@@ -1,0 +1,15 @@
+{
+  "name": "aeronav3d-tests",
+  "version": "1.0.0",
+  "description": "Smoke + parity tests for AeroNav3D (Phase 0 safety net).",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:smoke": "node smoke.mjs"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "playwright": "^1.61.1",
+    "pngjs": "^7.0.0"
+  }
+}
