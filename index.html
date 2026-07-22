@@ -414,6 +414,8 @@
   #fpStar.active{color:#ffd76a;}
   #fp3d{font-size:10px;font-weight:800;letter-spacing:.05em;}
   #fp3d.active{color:var(--accent);text-shadow:0 0 10px rgba(76,195,255,.6);}
+  #fpShare svg{display:block;}
+  #fpShare.copied{color:var(--accent);}
   .mf-toggle{
     position:absolute;top:20px;right:20px;z-index:10;cursor:pointer;
     display:flex;align-items:center;gap:7px;padding:10px 14px;--glass-radius:12px;
@@ -1480,6 +1482,12 @@
       <button id="fp3d" aria-label="3D chase view" aria-pressed="false" title="3D chase view">3D</button>
       <button id="fpExpand" aria-label="Expand aircraft details" aria-expanded="false" title="Expand details">⤢</button>
       <button id="fpStar" aria-label="Save to My Flights" title="Save to My Flights">☆</button>
+      <button id="fpShare" aria-label="Copy link to this flight" title="Copy link to this flight">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M10 13a5 5 0 0 0 7.07 0l2-2a5 5 0 0 0-7.07-7.07l-1 1"/>
+          <path d="M14 11a5 5 0 0 0-7.07 0l-2 2a5 5 0 0 0 7.07 7.07l1-1"/>
+        </svg>
+      </button>
       <button id="fpClose" aria-label="Close flight details">✕</button>
     </div>
   </div>
@@ -6041,6 +6049,7 @@ function closeFlightPanel() {
   if (view3d) exitView3d();
   if (selectedHex) setSelectedColor(selectedHex, false);
   selectedHex = null;
+  updatePermalink(null);           // drop ?flight= from the URL
   flightPanel.classList.remove("open");
   clearTrail();
   clearRouteDisplay();
@@ -6048,6 +6057,7 @@ function closeFlightPanel() {
   safe("flipBoard", () => restoreFlipBoard());   // bring the airport board back
 }
 document.getElementById("fpClose").addEventListener("click", closeFlightPanel);
+document.getElementById("fpShare").addEventListener("click", copyFlightLink);
 
 // Refresh the panel stats every second so the readout stays live between polls
 setInterval(() => {
@@ -6073,6 +6083,7 @@ function selectFlight(hex) {
   updateStar();
   if (trailHex !== hex) showTrail(hex);
   if (routeHex !== hex) showRoute(hex);
+  updatePermalink(hex);            // keep the shareable ?flight= link in sync
 }
 
 /* scene.pick returns only the topmost object, so a plane sitting under a
@@ -6704,6 +6715,98 @@ function runSearchAction(el) {
   closePalette();   // no-op when the palette isn't open
 }
 
+/* ---------- Shareable flight permalinks ----------
+ * GitHub Pages is a static host with no SPA routing, so the link is a query
+ * param (?flight=<callsign|reg|hex>) the single page reads on load and keeps in
+ * sync with the current selection — a link anyone can paste, backed by the
+ * static Open Graph preview. */
+function permalinkId(hex) {
+  const f = flights.get(hex);
+  if (f && f.data) {
+    const cs = (f.data.flight || "").trim();
+    if (cs) return cs;
+    if (f.data.r) return f.data.r;
+  }
+  return hex;
+}
+function updatePermalink(hex) {
+  try {
+    const url = new URL(location.href);
+    if (hex) url.searchParams.set("flight", permalinkId(hex));
+    else url.searchParams.delete("flight");
+    history.replaceState(null, "", url.pathname + url.search + url.hash);
+  } catch (_) { /* file:// or blocked history — permalink is best-effort */ }
+}
+const SHARE_ICON_HTML = document.getElementById("fpShare")?.innerHTML || "";
+async function copyFlightLink() {
+  if (!selectedHex) return;
+  const url = new URL(location.href);
+  url.searchParams.set("flight", permalinkId(selectedHex));
+  const btn = document.getElementById("fpShare");
+  try {
+    await navigator.clipboard.writeText(url.toString());
+    btn.classList.add("copied");
+    btn.title = "Link copied!";
+    btn.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5 5 11-12"/></svg>';
+    setTimeout(() => { btn.classList.remove("copied"); btn.title = "Copy link to this flight"; btn.innerHTML = SHARE_ICON_HTML; }, 1600);
+  } catch (_) {
+    btn.title = "Copy failed — copy the link from the address bar";
+  }
+}
+function flyToSelected(hex) {
+  const f = flights.get(hex);
+  if (!f || !f.data || typeof f.data.lon !== "number") return;
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(
+      f.data.lon, f.data.lat, Math.max(flightAltitudeMeters(f.data) * 2, 150000)),
+    duration: 1.6
+  });
+}
+/* On load, honour ?flight=… : select it from the local feed if present (waiting
+ * a few seconds as the feed fills), otherwise do a worldwide lookup, fly to it,
+ * and select once it enters the feed. Never overrides a manual pick. */
+async function openFlightParam() {
+  const q = (new URL(location.href).searchParams.get("flight") || "").trim();
+  if (!q) return;
+  const norm = q.toUpperCase();
+  const findLocal = () => {
+    for (const [hex, f] of flights) {
+      if (!f.data) continue;
+      const cs = (f.data.flight || "").trim().toUpperCase();
+      if (hex.toUpperCase() === norm || cs === norm || (f.data.r || "").toUpperCase() === norm) return hex;
+    }
+    return null;
+  };
+  for (let i = 0; i < 8; i++) {
+    if (selectedHex) return;
+    const hex = findLocal();
+    if (hex) { selectFlight(hex); flyToSelected(hex); return; }
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  if (selectedHex) return;
+  try {
+    const fm = /^([A-Z0-9]{2})(\d{1,4}[A-Z]?)$/.exec(norm);
+    const icaoCandidate = fm && IATA_TO_ICAO[fm[1]] ? IATA_TO_ICAO[fm[1]] + fm[2] : null;
+    const list = await globalLookup(norm, icaoCandidate);
+    const ac = list.find((a) => (a.flight || "").trim().toUpperCase() === norm ||
+      (a.r || "").toUpperCase() === norm || (a.hex || "").toUpperCase() === norm) || list[0];
+    if (!ac || typeof ac.lat !== "number" || selectedHex) return;
+    globalHits.set(ac.hex, ac);
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(ac.lon, ac.lat, Math.max(flightAltitudeMeters(ac) * 2, 200000)),
+      duration: 2.2,
+      complete: () => {
+        pollFlights();
+        const t0 = Date.now();
+        const iv = setInterval(() => {
+          if (flights.has(ac.hex)) { clearInterval(iv); selectFlight(ac.hex); }
+          else if (Date.now() - t0 > 12000) clearInterval(iv);
+        }, 600);
+      }
+    });
+  } catch (_) { /* lookup failed — leave the globe as-is */ }
+}
+
 /* Worldwide flight lookup (exact callsign or registration) via the
    airplanes.live public API, so search isn't limited to the local feed
    around the camera. Cached briefly per query while typing. */
@@ -6907,6 +7010,7 @@ if (featureOn("commandPalette")) {
 
 pollFlights();
 setInterval(pollFlights, FLIGHT_POLL_MS);
+openFlightParam();   // deep-link: ?flight=<callsign|reg|hex> selects that aircraft
 // Refresh promptly after the user pans somewhere new
 let lastMovePoll = 0;
 viewer.camera.moveEnd.addEventListener(() => {
