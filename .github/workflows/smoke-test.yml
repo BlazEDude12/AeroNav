@@ -1,11 +1,13 @@
 name: tests
 
-# Two guards:
+# Three guards:
 #  - smoke: loads index.html in a real headless browser and asserts the globe
 #    actually paints (no blank canvas) with zero uncaught JS errors — the app's
 #    most fragile, most invisible-to-review failure mode. See tests/smoke.mjs.
 #  - parity: asserts the OpenSky normalizers in index.ts and server.py stay in
 #    lockstep so the deliberately-duplicated proxies don't drift. See parity.mjs.
+#  - flows: drives the core UI (map/satellite + layer toggles, My Flights, and
+#    aircraft selection when live flights load) to catch regressions. flows.mjs.
 
 on:
   push:
@@ -38,3 +40,7 @@ jobs:
       - name: Run smoke test
         working-directory: tests
         run: node smoke.mjs
+
+      - name: Run core-flows test
+        working-directory: tests
+        run: node flows.mjs
