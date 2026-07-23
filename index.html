@@ -409,6 +409,35 @@
   .panel-grid span{display:block;font-size:10px;letter-spacing:.18em;color:var(--muted);}
   .panel-grid b{font-size:17px;font-weight:600;}
 
+  /* ---------- Previous sectors (earlier legs from today's trace) ---------- */
+  .sectors{padding:2px 16px 14px;border-top:1px solid rgba(var(--glass-tint),.08);}
+  .sectors-head{font-size:10px;letter-spacing:.18em;color:var(--muted);padding:12px 0 6px;}
+  .sector-row{
+    display:flex;align-items:center;gap:10px;padding:7px 0;
+    border-top:1px solid rgba(var(--glass-tint),.06);
+  }
+  .sector-row:first-child{border-top:none;}
+  .sector-route{flex:1;display:flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;}
+  .sector-route i{font-style:normal;color:var(--muted);font-size:11px;}
+  .sector-time{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;}
+  .sector-btn{
+    flex:none;cursor:pointer;padding:5px 10px;border-radius:8px;
+    font-family:inherit;font-size:10.5px;font-weight:700;letter-spacing:.06em;
+    color:var(--muted);background:rgba(var(--glass-tint),.06);
+    border:1px solid rgba(var(--glass-tint),.14);
+    transition:color .15s,background .15s,border-color .15s;
+  }
+  .sector-btn:hover{color:var(--text);background:rgba(var(--glass-tint),.11);}
+  .sector-btn.on{
+    color:#dceaff;border-color:rgba(120,180,255,.5);
+    background:linear-gradient(180deg,rgba(76,150,235,.28),rgba(46,96,170,.16));
+  }
+  .sector-tag{
+    flex:none;font-size:9.5px;font-weight:800;letter-spacing:.12em;color:#9fd1ff;
+    padding:4px 8px;border-radius:7px;
+    background:rgba(76,150,235,.16);border:1px solid rgba(120,180,255,.35);
+  }
+
   /* ---------- Favorites / auth ---------- */
   .panel-head .actions{display:flex;gap:2px;}
   #fpStar.active{color:#ffd76a;}
@@ -1566,6 +1595,12 @@
     <div style="grid-column:1/-1"><span>SQUAWK</span><b id="fpSquawk">—</b></div>
     <div style="grid-column:1/-1"><span>COUNTRY OF REGISTRATION</span><b id="fpCountry">—</b></div>
   </div>
+  <!-- The upcoming leg (when the routeset files one) plus earlier legs from
+       today's trace, latest first, each toggleable on the map -->
+  <div class="sectors" id="fpSectors" hidden>
+    <div class="sectors-head">FLIGHT SECTORS</div>
+    <div id="fpSectorList"></div>
+  </div>
  </div>
 </div>
 
@@ -2166,6 +2201,7 @@ function makeTrailPrimitive(rawPositions, rawAltsFt) {
 function clearTrail() {
   trailPrimitives.forEach((p) => viewer.scene.primitives.remove(p));
   if (livePrimitive) viewer.scene.primitives.remove(livePrimitive);
+  clearPrevSectors();
   trailPrimitives = [];
   livePrimitive = null;
   trailPositions = [];
@@ -2296,7 +2332,8 @@ async function fetchFullTrace(hex) {
         for (const e of part.trace) {
           if (!Array.isArray(e) || typeof e[1] !== "number" || typeof e[2] !== "number") continue;
           rows.push({ t: t0 + e[0] * 1000, lat: e[1], lon: e[2],
-                      alt_ft: typeof e[3] === "number" ? e[3] : 0 });   // "ground" → surface
+                      alt_ft: typeof e[3] === "number" ? e[3] : 0,      // "ground" → surface
+                      g: e[3] === "ground" });                          // sector-boundary signal
         }
       }
       if (rows.length < 2) continue;
@@ -2313,12 +2350,181 @@ async function fetchFullTrace(hex) {
   return null;
 }
 
+/* ----- Historical flight sectors --------------------------------------
+ * The full-day trace holds every leg the aircraft flew, but only the CURRENT
+ * sector should draw live — the earlier legs become "Previous Sectors" in the
+ * flight panel, each with its own Show/Hide toggle. A sector boundary is a
+ * sustained ground stop (parked at a gate) or a long coverage gap; a short
+ * taxi tail is kept on each side of the stop so legs still start and end on
+ * the pavement, while the parked hours in between are dropped. */
+const SECTOR_GROUND_MS = 5 * 60 * 1000;   // parked this long = sector boundary
+const SECTOR_GAP_MS = 30 * 60 * 1000;     // silent this long = sector boundary
+const SECTOR_TAXI_MS = 2 * 60 * 1000;     // taxi tail kept on each side
+let prevSectors = [];   // [{ sectorId, departureAirport, arrivalAirport,
+                        //    adsbData, isVisible, primitives, t0, t1 }]
+
+function splitSectors(rows) {
+  const sectors = [];
+  let cur = [];
+  let i = 0;
+  while (i < rows.length) {
+    const p = rows[i];
+    const prev = cur[cur.length - 1];
+    if (prev && p.t - prev.t > SECTOR_GAP_MS) {        // coverage hole
+      if (cur.some((q) => !q.g)) sectors.push(cur);
+      cur = [];
+    }
+    if (p.g) {
+      let j = i;                                        // span the ground streak
+      while (j + 1 < rows.length && rows[j + 1].g && rows[j + 1].t - rows[j].t <= SECTOR_GAP_MS) j++;
+      const flownYet = cur.some((q) => !q.g);
+      if (flownYet && rows[j].t - p.t > SECTOR_GROUND_MS) {
+        for (let k = i; k <= j && rows[k].t - p.t <= SECTOR_TAXI_MS; k++) cur.push(rows[k]);
+        sectors.push(cur);                              // close with the taxi-in tail
+        cur = [];
+        for (let k = i; k <= j; k++)                    // seed next with taxi-out tail
+          if (rows[j].t - rows[k].t <= SECTOR_TAXI_MS) cur.push(rows[k]);
+      } else {
+        for (let k = i; k <= j; k++) cur.push(rows[k]);
+      }
+      i = j + 1;
+      continue;
+    }
+    cur.push(p);
+    i++;
+  }
+  if (cur.length > 1) sectors.push(cur);
+  const current = sectors.pop() || [];
+  return { sectors, current };
+}
+
+// Nearest major hub to a point, for the "SLC ➔ LAX" row labels. The bundled
+// AIRPORTS list is hubs-only, so small fields resolve to "—".
+function nearestAirportCode(lat, lon) {
+  let best = null, bestKm = 60;   // beyond ~60 km it isn't "at" that airport
+  for (const a of AIRPORTS) {
+    const d = gcKm(lat, lon, a[4], a[5]);
+    if (d < bestKm) { bestKm = d; best = a; }
+  }
+  return best ? (best[0] || best[1]) : "—";
+}
+
+// Historical sectors draw with the SAME splined, altitude-coloured look as
+// the live trail — yellow near the ground sweeping to blue at cruise. One
+// primitive per contiguous run, split at gaps exactly like the live path.
+function makeSectorPrimitives(points) {
+  const prims = [];
+  let run = [], alts = [];
+  const flush = () => {
+    if (run.length > 1) prims.push(makeTrailPrimitive(run, alts));
+    run = []; alts = [];
+  };
+  let prev = null;
+  for (const p of points) {
+    if (prev && (p.t - prev.t > TRAIL_GAP_MS || gcKm(prev.lat, prev.lon, p.lat, p.lon) > TRAIL_JUMP_KM)) flush();
+    const surf = (p.alt_ft || 0) < 8000 ? groundElevFt(p.lat, p.lon) : null;
+    run.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat, aglBlendMeters(p.alt_ft || 0, surf)));
+    alts.push(p.alt_ft || 0);
+    prev = p;
+  }
+  flush();
+  return prims;
+}
+
+function clearPrevSectors() {
+  for (const s of prevSectors) s.primitives.forEach((p) => viewer.scene.primitives.remove(p));
+  prevSectors = [];
+  renderSectorList();
+}
+
+function toggleSector(i) {
+  const s = prevSectors[i];
+  if (!s) return;
+  if (s.isVisible) {
+    s.primitives.forEach((p) => viewer.scene.primitives.remove(p));
+    s.primitives = [];
+    s.isVisible = false;
+  } else {
+    s.primitives = makeSectorPrimitives(s.adsbData);
+    s.isVisible = true;
+  }
+  renderSectorList();
+}
+
+/* The leg the aircraft is scheduled to serve AFTER the one it's flying now.
+ * Only knowable when the callsign's filed routeset carries onward stops
+ * (A→B→C…): currentLeg says which pair is being flown, and the airport after
+ * that pair is the next sector. Two-stop routesets — most flights — have no
+ * onward data, so the row simply doesn't appear. */
+function nextSectorFor() {
+  const f = selectedHex && flights.get(selectedHex);
+  if (!f || !f.data) return null;
+  const route = routeCache.get((f.data.flight || "").trim());
+  if (!route || !Array.isArray(route.airports)) return null;
+  const pts = route.airports.filter((a) => typeof a.lat === "number" && typeof a.lon === "number");
+  if (pts.length < 3) return null;
+  const [, dest] = currentLeg(pts, f.data);
+  const i = pts.indexOf(dest);
+  if (i < 0 || i + 1 >= pts.length) return null;   // flying the final leg
+  return { from: dest, to: pts[i + 1] };
+}
+
+function renderSectorList() {
+  const wrap = document.getElementById("fpSectors");
+  const list = document.getElementById("fpSectorList");
+  if (!wrap || !list) return;
+  const next = nextSectorFor();
+  if (!prevSectors.length && !next) { wrap.hidden = true; list.innerHTML = ""; return; }
+  const hhmm = (t) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const dstr = (t) => new Date(t).toLocaleDateString([], { month: "short", day: "numeric" });
+  let html = "";
+  // The upcoming leg sits on top — no trail exists for it yet, so no toggle.
+  if (next) {
+    const code = (a) => (a.iata || a.icao || "—");
+    html += `<div class="sector-row sector-next">` +
+      `<span class="sector-route"><b>${code(next.from)}</b><i>➔</i><b>${code(next.to)}</b></span>` +
+      `<span class="sector-tag">UP NEXT</span></div>`;
+  }
+  // Then history, latest sector first — data-i keeps the true index.
+  for (let i = prevSectors.length - 1; i >= 0; i--) {
+    const s = prevSectors[i];
+    html += `<div class="sector-row">` +
+      `<span class="sector-route"><b>${s.departureAirport}</b><i>➔</i><b>${s.arrivalAirport}</b></span>` +
+      `<span class="sector-time">${dstr(s.t0)} · ${hhmm(s.t0)}–${hhmm(s.t1)}</span>` +
+      `<button class="sector-btn${s.isVisible ? " on" : ""}" data-i="${i}">` +
+        `${s.isVisible ? "Hide" : "Show"}</button>` +
+      `</div>`;
+  }
+  list.innerHTML = html;
+  wrap.hidden = false;
+}
+document.getElementById("fpSectorList").addEventListener("click", (e) => {
+  const b = e.target.closest(".sector-btn");
+  if (b) toggleSector(Number(b.dataset.i));
+});
+
 async function showTrail(hex) {
   clearTrail();
   trailHex = hex;
   // The complete trace first; our own snapshot table only as the fallback.
   let history = await fetchFullTrace(hex) || [];
   if (trailHex !== hex) return;               // selection changed while loading
+  // Split the day into sectors: only the CURRENT leg draws live; the earlier
+  // legs become the panel's "Previous Sectors" list, each toggleable.
+  if (history.length && history[0].t != null) {
+    const { sectors, current } = splitSectors(history);
+    history = current;
+    prevSectors = sectors.map((pts, i) => ({
+      sectorId: hex + ":" + i,
+      departureAirport: nearestAirportCode(pts[0].lat, pts[0].lon),
+      arrivalAirport: nearestAirportCode(pts[pts.length - 1].lat, pts[pts.length - 1].lon),
+      adsbData: pts,
+      isVisible: false,
+      primitives: [],
+      t0: pts[0].t, t1: pts[pts.length - 1].t,
+    }));
+    renderSectorList();
+  }
   if (!history.length) try {
     const since = new Date(Date.now() - 3600 * 1000).toISOString();
     const { data, error } = await sb
@@ -2871,6 +3077,8 @@ async function showRoute(hex) {
     routeNote("Route unknown — no flight-plan data for this callsign");
     return;
   }
+  // Route data just landed — the sector list may now know the upcoming leg.
+  renderSectorList();
   const city = (ap) => (ap.location || ap.name || "").split(",")[0];
   const canProgress = typeof dep.lat === "number" && typeof dest.lat === "number";
   fpRoute.innerHTML =
