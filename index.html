@@ -83,6 +83,20 @@
     -webkit-background-clip:text;background-clip:text;color:transparent;}
   .brand .name em{font-style:normal;-webkit-text-fill-color:var(--accent);
     text-shadow:0 0 15px rgba(76,195,255,.55);}
+  /* Premium BETA chip beside the wordmark. The name clips a gradient into its
+     glyphs (color:transparent + background-clip:text), so the chip must fully
+     reset that or its own text and pill background vanish. */
+  .brand .name .beta{
+    display:inline-block;vertical-align:3.5px;margin-left:8px;
+    padding:2.5px 6.5px;border-radius:6px;
+    font-size:8.5px;font-weight:800;letter-spacing:.16em;
+    color:#dceeff;-webkit-text-fill-color:#dceeff;
+    -webkit-background-clip:border-box;background-clip:border-box;
+    background:linear-gradient(180deg,rgba(86,158,240,.40),rgba(46,96,170,.22));
+    border:1px solid rgba(130,185,255,.55);
+    box-shadow:0 0 12px rgba(76,150,235,.35),inset 0 1px 0 rgba(255,255,255,.28);
+    text-shadow:none;
+  }
   .brand .tag{font-size:9.5px;letter-spacing:.3em;color:var(--muted);margin-top:3px;text-transform:uppercase;}
 
   /* ---------- Search + map-style toggle (top centre) ---------- */
@@ -1450,7 +1464,7 @@
     <circle cx="17" cy="17" r="15" stroke="#eaf3ff" stroke-width=".7" opacity=".75"/>
   </svg>
   <div>
-    <div class="name">Aero<em>Nav</em>3D</div>
+    <div class="name">Aero<em>Nav</em>3D<span class="beta">BETA</span></div>
     <div class="tag" id="brandTag">Global Navigation</div>
   </div>
 </div>
@@ -3674,6 +3688,113 @@ setInterval(renderStatus, 1000);
 
 // `retry` marks an internal re-poll after switching feed or endpoint: it
 // skips the throttle, which the first attempt already paid.
+/* One aircraft's fresh fix → the flights map: classify (or reclassify in
+ * place), keep the motion/turn/ground bookkeeping, stash the render surface,
+ * extend the trail. Shared by the viewport poll and the tracked-flight
+ * keepalive, so both paths treat a fix identically. */
+function ingestAircraft(ac, now) {
+  const klass = classifyAircraft(ac);
+  let f = flights.get(ac.hex);
+  if (!f) {
+    const ic = ICONS[klass];
+    f = {
+      klass,
+      billboard: planeBillboards.add({
+        image: ic.image,
+        id: "plane:" + ac.hex,
+        width: ic.size, height: ic.size,
+        color: ic.color,
+        scaleByDistance: new Cesium.NearFarScalar(5e5, 1.0, 1.5e7, 0.35)
+      })
+    };
+    flights.set(ac.hex, f);
+  } else if (f.klass !== klass) {
+    // type/category can arrive a few messages later — reclassify in place
+    const ic = ICONS[klass];
+    f.klass = klass;
+    f.billboard.image = ic.image;
+    f.billboard.width = ic.size;
+    f.billboard.height = ic.size;
+    if (selectedHex !== ac.hex) f.billboard.color = ic.color;
+  }
+  // Direction of actual movement since the previous fix — used to point
+  // taxiing aircraft the way they are really going (see planeHeading)
+  if (f.data && (f.data.lat !== ac.lat || f.data.lon !== ac.lon)) {
+    f.moveBearing = bearingDeg(f.data.lat, f.data.lon, ac.lat, ac.lon);
+  }
+  // Turn rate (deg/s) from consecutive heading fixes, low-pass smoothed, so
+  // the 3D model can bank into its turns instead of snapping between headings.
+  {
+    const curH = typeof ac.track === "number" ? ac.track
+               : typeof ac.true_heading === "number" ? ac.true_heading : null;
+    const dt = (now - (f.fetchedAt || now)) / 1000;
+    if (f._hdg != null && curH != null && dt > 0.4 && dt < 30) {
+      const dh = ((curH - f._hdg + 540) % 360) - 180;   // signed shortest turn
+      const rate = dh / dt;
+      f.turnRate = f.turnRate == null ? rate : f.turnRate * 0.6 + rate * 0.4;
+    }
+    if (curH != null) f._hdg = curH;
+  }
+  // Remember when the aircraft was last on the ground, its first altitude
+  // after lifting off, and when it was last genuinely descending —
+  // flightMode uses this history to recognise takeoffs and landings even
+  // when the broadcast vertical rate lags the real motion.
+  if (ac.alt_baro === "ground") { f.groundAt = now; f.liftAlt = null; }
+  else {
+    if (f.groundAt && f.liftAlt == null && typeof ac.alt_baro === "number")
+      f.liftAlt = ac.alt_baro;
+    if (typeof ac.baro_rate === "number" && ac.baro_rate <= -400)
+      f.sinkAt = now;
+  }
+  // Ground elevation under the aircraft, for ground-relative rendering low
+  // down. Eased over a few polls so an elevation that arrives mid-approach
+  // slides the plane onto the corrected path instead of popping it.
+  {
+    const surfTgt = surfFtForRender(ac);
+    if (typeof surfTgt === "number") {
+      if (f.surfFt == null) f.surfFt = f.data ? 0 : surfTgt;
+      f.surfFt += (surfTgt - f.surfFt) * 0.5;
+    }
+    ac._surfFt = f.surfFt;
+  }
+  f.data = ac;
+  f.fetchedAt = now;
+  extendTrail(ac);
+  return f;
+}
+
+/* ----- Tracked-flight keepalive ---------------------------------------
+ * The viewport feed only covers what the camera looks at — zoom out to the
+ * global snapshot or pan away and the tracked plane would go stale. So while
+ * a flight is selected, poll a small circle centred on the PLANE's own last
+ * position through the same /flights proxy: it works at any zoom, follows
+ * the aircraft around the planet, and shares the worker's cache. Skipped
+ * whenever the viewport feed already refreshed the flight this cycle. */
+const TRACK_POLL_MS = 7000;
+const TRACK_STALE_MS = 9000;
+let trackPollBusy = false;
+async function pollSelected() {
+  if (trackPollBusy || document.hidden) return;
+  const f = selectedHex && flights.get(selectedHex);
+  if (!f || !f.data || typeof f.data.lat !== "number") return;
+  if (Date.now() - f.fetchedAt < TRACK_STALE_MS) return;   // viewport feed has it
+  trackPollBusy = true;
+  try {
+    const r = await fetch(
+      `${flightEndpoint}?circle=${f.data.lat.toFixed(2)},${f.data.lon.toFixed(2)},40`);
+    if (!r.ok) return;
+    const j = await r.json();
+    const mine = (j.aircraft || j.ac || []).find((a) => a && a.hex === selectedHex);
+    if (mine && typeof mine.lat === "number" && typeof mine.lon === "number") {
+      ingestAircraft(mine, Date.now());
+      if (selectedHex && flights.has(selectedHex))
+        updateFlightPanel(flights.get(selectedHex).data);
+    }
+  } catch (_) { /* offline or throttled — keep coasting on the last fix */ }
+  finally { trackPollBusy = false; }
+}
+setInterval(pollSelected, TRACK_POLL_MS);
+
 async function pollFlights(retry) {
   if (document.hidden) return;
   const cam = viewer.camera.positionCartographic;
@@ -3732,80 +3853,17 @@ async function pollFlights(retry) {
   for (const ac of json.aircraft || json.ac || []) {
     if (typeof ac.lat !== "number" || typeof ac.lon !== "number") continue;
     seen.add(ac.hex);
-    const klass = classifyAircraft(ac);
-    let f = flights.get(ac.hex);
-    if (!f) {
-      const ic = ICONS[klass];
-      f = {
-        klass,
-        billboard: planeBillboards.add({
-          image: ic.image,
-          id: "plane:" + ac.hex,
-          width: ic.size, height: ic.size,
-          color: ic.color,
-          scaleByDistance: new Cesium.NearFarScalar(5e5, 1.0, 1.5e7, 0.35)
-        })
-      };
-      flights.set(ac.hex, f);
-    } else if (f.klass !== klass) {
-      // type/category can arrive a few messages later — reclassify in place
-      const ic = ICONS[klass];
-      f.klass = klass;
-      f.billboard.image = ic.image;
-      f.billboard.width = ic.size;
-      f.billboard.height = ic.size;
-      if (selectedHex !== ac.hex) f.billboard.color = ic.color;
-    }
-    // Direction of actual movement since the previous fix — used to point
-    // taxiing aircraft the way they are really going (see planeHeading)
-    if (f.data && (f.data.lat !== ac.lat || f.data.lon !== ac.lon)) {
-      f.moveBearing = bearingDeg(f.data.lat, f.data.lon, ac.lat, ac.lon);
-    }
-    // Turn rate (deg/s) from consecutive heading fixes, low-pass smoothed, so
-    // the 3D model can bank into its turns instead of snapping between headings.
-    {
-      const curH = typeof ac.track === "number" ? ac.track
-                 : typeof ac.true_heading === "number" ? ac.true_heading : null;
-      const dt = (now - (f.fetchedAt || now)) / 1000;
-      if (f._hdg != null && curH != null && dt > 0.4 && dt < 30) {
-        const dh = ((curH - f._hdg + 540) % 360) - 180;   // signed shortest turn
-        const rate = dh / dt;
-        f.turnRate = f.turnRate == null ? rate : f.turnRate * 0.6 + rate * 0.4;
-      }
-      if (curH != null) f._hdg = curH;
-    }
-    // Remember when the aircraft was last on the ground, its first altitude
-    // after lifting off, and when it was last genuinely descending —
-    // flightMode uses this history to recognise takeoffs and landings even
-    // when the broadcast vertical rate lags the real motion.
-    if (ac.alt_baro === "ground") { f.groundAt = now; f.liftAlt = null; }
-    else {
-      if (f.groundAt && f.liftAlt == null && typeof ac.alt_baro === "number")
-        f.liftAlt = ac.alt_baro;
-      if (typeof ac.baro_rate === "number" && ac.baro_rate <= -400)
-        f.sinkAt = now;
-    }
-    // Ground elevation under the aircraft, for ground-relative rendering low
-    // down. Eased over a few polls so an elevation that arrives mid-approach
-    // slides the plane onto the corrected path instead of popping it.
-    {
-      const surfTgt = surfFtForRender(ac);
-      if (typeof surfTgt === "number") {
-        if (f.surfFt == null) f.surfFt = f.data ? 0 : surfTgt;
-        f.surfFt += (surfTgt - f.surfFt) * 0.5;
-      }
-      ac._surfFt = f.surfFt;
-    }
-    f.data = ac;
-    f.fetchedAt = now;
-    extendTrail(ac);
+    ingestAircraft(ac, now);
   }
-  // Drop aircraft that left the query circle or went silent
+  // Drop aircraft that left the query circle or went silent — EXCEPT the
+  // tracked flight: its own keepalive poll keeps it fed wherever the camera
+  // goes, so the plane, its trail and its route never vanish mid-follow just
+  // because the viewport feed stopped covering it.
   for (const [hex, f] of flights) {
     if (!seen.has(hex)) {
+      if (hex === selectedHex) continue;
       planeBillboards.remove(f.billboard);
       flights.delete(hex);
-      if (selectedHex === hex) closeFlightPanel();
     }
   }
   applyAirlineFilter();
@@ -3874,7 +3932,10 @@ scene.preRender.addEventListener(() => {
   flights.forEach((f) => {
     if (!f.data) return;
     const hdg = planeHeading(f);
-    f.billboard.position = flightPosition(f.data, (now - f.fetchedAt) / 1000, hdg);
+    // Dead-reckon at most 3 minutes past the last fix: a tracked flight that
+    // genuinely leaves all coverage freezes at its last known spot instead of
+    // sailing on across the planet on stale speed and heading.
+    f.billboard.position = flightPosition(f.data, Math.min((now - f.fetchedAt) / 1000, 180), hdg);
     f.billboard.rotation = screenRotation(f.billboard.position, hdg);
     // Foreshorten the fuselage axis by how end-on the motion is (floor keeps
     // the glyph clickable when flying dead away). Top-down views squash ~0.
@@ -6360,9 +6421,16 @@ if (featureOn("timelineScrubber")) {
   scrubPlayBtn.addEventListener("click", () => safe("timelineScrubber", () => toggleReplay()));
 }
 
+const PLANE_SCALE_DEFAULT = new Cesium.NearFarScalar(5e5, 1.0, 1.5e7, 0.35);
+const PLANE_SCALE_SELECTED = new Cesium.NearFarScalar(5e5, 1.25, 1.5e7, 1.0);
 function setSelectedColor(hex, selected) {
   const f = flights.get(hex);
-  if (f) f.billboard.color = selected ? PLANE_SELECTED : ICONS[f.klass].color;
+  if (!f) return;
+  f.billboard.color = selected ? PLANE_SELECTED : ICONS[f.klass].color;
+  // The tracked plane must stay findable at ANY zoom: everyone else shrinks
+  // to 35% at world view, the followed aircraft keeps full size (and reads a
+  // touch larger up close).
+  f.billboard.scaleByDistance = selected ? PLANE_SCALE_SELECTED : PLANE_SCALE_DEFAULT;
 }
 function closeFlightPanel() {
   disarmCompare();
